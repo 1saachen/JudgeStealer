@@ -1,0 +1,14 @@
+# Install a CUDA-compatible PyTorch build separately when the host requires a
+# specific CUDA version. The rest of the project dependencies are listed here.
+transformers
+peft
+accelerate
+datasets
+numpy
+tqdm
+psutil
+scipy
+sentencepiece
+safetensors
+bitsandbytes
+pytest
