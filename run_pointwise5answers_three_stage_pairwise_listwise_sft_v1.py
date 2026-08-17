@@ -31,6 +31,7 @@ import torch.nn.functional as F
 
 import run_pointwise5answers_three_to_listwise_v1 as lw
 import run_pointwise5answers_two_to_pairwise_v1 as base
+from ablation_budget import resolve_percentage_budget
 
 CLASS_TEACHER_TASK_PAIRWISE = 2
 CLASS_TEACHER_TASK_LISTWISE_TOP = 3
@@ -102,6 +103,7 @@ class RunConfig:
     pointwise_distance_weight: float
     pointwise_class_weight_mode: str
     pointwise_class_weight_strength: float
+    budget_percent: float
     budget_units: int
     pointwise_epochs: int
     pairwise_epochs: int
@@ -2027,6 +2029,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pointwise-distance-weight", type=float, default=0.0)
     parser.add_argument("--pointwise-class-weight-mode", choices=["none", "balanced"], default="none")
     parser.add_argument("--pointwise-class-weight-strength", type=float, default=1.0)
+    parser.add_argument("--budget-percent", type=float, default=0.0)
     parser.add_argument("--budget-units", type=int, default=750)
     parser.add_argument("--pointwise-epochs", type=int, default=1)
     parser.add_argument("--pairwise-epochs", type=int, default=1)
@@ -2235,6 +2238,7 @@ def main() -> None:
         pointwise_distance_weight=float(args.pointwise_distance_weight),
         pointwise_class_weight_mode=str(args.pointwise_class_weight_mode),
         pointwise_class_weight_strength=float(args.pointwise_class_weight_strength),
+        budget_percent=float(args.budget_percent),
         budget_units=int(args.budget_units),
         pointwise_epochs=int(args.pointwise_epochs),
         pairwise_epochs=int(args.pairwise_epochs),
@@ -2468,6 +2472,8 @@ def main() -> None:
         raise ValueError("stage4-listwise-multiplier must be >= 1")
         if int(cfg.stage4_epochs) <= 0:
             raise ValueError("stage4-epochs must be > 0 when Stage 4 is enabled")
+    if not (0.0 <= float(cfg.budget_percent) <= 100.0):
+        raise ValueError("budget-percent must be in [0, 100]")
 
     ds_path = base._resolve_existing_path(str(args.pointwise_5answers_dataset))
     eval_path = base._resolve_existing_path(str(args.listwise_eval_dataset))
@@ -2481,6 +2487,20 @@ def main() -> None:
     out = Path(args.out) if args.out else Path("outputs") / ("three_stage_sft_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
     out.mkdir(parents=True, exist_ok=True)
 
+    questions, load_stats = lw._load_scored_questions_ge3(str(ds_path), score_min=int(cfg.score_min), score_max=int(cfg.score_max))
+    train_questions, val_questions, split_info = base._split_questions(questions, seed=int(cfg.val_split_seed), val_ratio=float(cfg.val_ratio))
+    split_info["pointwise_val_answer_seed"] = int(cfg.pointwise_val_answer_seed)
+    percentage_budget_stats: Dict[str, Any] = {}
+    if float(cfg.budget_percent) > 0.0:
+        resolved_budget = resolve_percentage_budget(len(train_questions), cfg.budget_percent)
+        cfg.budget_units = resolved_budget.budget_units
+        cfg.candidate_selector_init_triples = resolved_budget.init_triples
+        cfg.candidate_selector_batch_size = resolved_budget.selection_batch_size
+        cfg.candidate_selector_max_score_candidates = resolved_budget.max_score_candidates
+        percentage_budget_stats = asdict(resolved_budget)
+        split_info["percentage_budget"] = percentage_budget_stats
+        _write_json(out / "budget_percent_resolution.json", percentage_budget_stats)
+
     if _is_primary_process():
         print("\n" + "=" * 80)
         print("Start run: generative SFT pointwise -> pairwise -> listwise")
@@ -2488,6 +2508,12 @@ def main() -> None:
         print(f"dataset={ds_path}")
         print(f"listwise_eval={eval_path}")
         print(f"budget_units={cfg.budget_units}")
+        if percentage_budget_stats:
+            print(
+                f"budget_percent={cfg.budget_percent:g} "
+                f"candidate_queries={len(train_questions)} "
+                f"query_budget={percentage_budget_stats['query_budget']}"
+            )
         print(f"selection={cfg.train_selection_mode}")
         print(f"output_dir={out}")
         if _fsdp_enabled(cfg):
@@ -2498,10 +2524,6 @@ def main() -> None:
             )
 
     _write_json(out / "config.json", {**asdict(cfg), "dataset": str(ds_path), "listwise_eval_dataset": str(eval_path), "pairwise_eval_dataset": str(pairwise_eval_path), "llama": str(args.llama)})
-
-    questions, load_stats = lw._load_scored_questions_ge3(str(ds_path), score_min=int(cfg.score_min), score_max=int(cfg.score_max))
-    train_questions, val_questions, split_info = base._split_questions(questions, seed=int(cfg.val_split_seed), val_ratio=float(cfg.val_ratio))
-    split_info["pointwise_val_answer_seed"] = int(cfg.pointwise_val_answer_seed)
     _write_json(out / "dataset_load_stats.json", load_stats)
     _write_json(out / "split_questions.json", split_info)
 
@@ -3021,6 +3043,8 @@ def main() -> None:
         "selection_stats": selected_stats,
         "split_by_question": split_info,
         "train_budget": {
+            "budget_percent": float(cfg.budget_percent),
+            "percentage_resolution": percentage_budget_stats,
             "budget_units": int(cfg.budget_units),
             "effective_budget_units": int(selected_stats.get("effective_budget_units", len(pointwise_train))),
             "train_triples": int(len(train_triples)),
