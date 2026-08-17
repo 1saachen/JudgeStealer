@@ -69,6 +69,15 @@ should_skip_job() {
   return 1
 }
 
+skip_configured_jobs() {
+  local job
+  while (( next_job_index < ${#JOBS[@]} )) && should_skip_job "${JOBS[$next_job_index]}"; do
+    job="${JOBS[$next_job_index]}"
+    log_status "SKIP configured job=$job"
+    next_job_index=$((next_job_index + 1))
+  done
+}
+
 gpu_uuid() {
   nvidia-smi -i "$1" --query-gpu=uuid --format=csv,noheader,nounits 2>/dev/null \
     | awk '{$1=$1; print}'
@@ -256,12 +265,6 @@ next_job_index=0
 active_workers=0
 overall_rc=0
 while (( next_job_index < ${#JOBS[@]} || active_workers > 0 )); do
-  while (( next_job_index < ${#JOBS[@]} )) && should_skip_job "${JOBS[$next_job_index]}"; do
-    job="${JOBS[$next_job_index]}"
-    log_status "SKIP configured job=$job"
-    next_job_index=$((next_job_index + 1))
-  done
-
   for gpu in "${!GPU_WORKER_PIDS[@]}"; do
     pid="${GPU_WORKER_PIDS[$gpu]}"
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -279,6 +282,7 @@ while (( next_job_index < ${#JOBS[@]} || active_workers > 0 )); do
   done
 
   for gpu in "${ALLOWED_GPUS[@]}"; do
+    skip_configured_jobs
     (( next_job_index < ${#JOBS[@]} )) || break
     [[ -z "${GPU_WORKER_PIDS[$gpu]+assigned}" ]] || continue
     gpu_is_idle "$gpu" || continue

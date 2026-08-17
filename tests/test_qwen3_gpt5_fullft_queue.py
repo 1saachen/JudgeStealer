@@ -122,3 +122,12 @@ def test_queue_supports_explicit_job_skips_before_gpu_assignment():
     assert 'SKIP_JOBS="${SKIP_JOBS:-}"' in text
     assert "should_skip_job()" in text
     assert 'SKIP configured job=$job' in text
+
+
+def test_queue_checks_configured_skips_before_each_gpu_dispatch():
+    text = launcher_text()
+    dispatch_loop = text.rsplit('for gpu in "${ALLOWED_GPUS[@]}"; do', 1)[1]
+    assert "skip_configured_jobs" in dispatch_loop
+    assert dispatch_loop.index("skip_configured_jobs") < dispatch_loop.index(
+        'job="${JOBS[$next_job_index]}"'
+    )
