@@ -173,7 +173,9 @@ New jobs: 36
 ```
 
 job 名必须包含 dataset、block 和 setting。输出目录名还必须包含 Qwen3-1.7B、
-LoRA、seed 42 和解析后的预算，保证所有任务互不覆盖。
+LoRA 和 seed 42；预算任务使用 percentage label 区分。运行时解析得到的实际 query
+budget、answer-unit budget、init、batch 和 pool 写入输出配置与统计文件，保证结果
+可追溯且所有任务互不覆盖。
 
 输出和日志默认写入本地磁盘：
 
