@@ -4,7 +4,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON_BIN:-python}"
 SCRIPT="$ROOT/run_pointwise5answers_three_stage_pairwise_listwise_sft_v1.py"
-LOG_ROOT="$ROOT/outputs/qwen3_gpt5_fullft_auto_queue_logs"
+DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"
+LOG_ROOT="$OUTPUT_ROOT/qwen3_gpt5_fullft_auto_queue_logs"
 STATUS_LOG="$LOG_ROOT/job_status.log"
 POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
@@ -24,13 +26,39 @@ JOBS=(
 declare -A GPU_WORKER_PIDS=()
 declare -A GPU_WORKER_JOBS=()
 
-mkdir -p "$LOG_ROOT"
+if ! mkdir -p "$OUTPUT_ROOT" "$LOG_ROOT"; then
+  echo "failed to create output directory: $OUTPUT_ROOT" >&2
+  exit 1
+fi
 cd "$ROOT"
 
 log_status() {
   { flock 9; echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] $*" | tee -a "$STATUS_LOG"; } \
     9>"$LOG_ROOT/.status.lock"
 }
+
+check_output_storage() {
+  local fs_type="" available="unknown"
+
+  if command -v findmnt >/dev/null 2>&1; then
+    fs_type="$(findmnt -n -o FSTYPE -T "$OUTPUT_ROOT" 2>/dev/null || true)"
+  else
+    log_status "WARNING findmnt unavailable; output filesystem type not checked"
+  fi
+  available="$(df -hP "$OUTPUT_ROOT" 2>/dev/null | awk 'NR == 2 {print $4}' || true)"
+  [[ -n "$available" ]] || available="unknown"
+  [[ -n "$fs_type" ]] || fs_type="unknown"
+
+  log_status "STORAGE output_root=$OUTPUT_ROOT fstype=$fs_type available=$available"
+  case "$fs_type" in
+    nfs|nfs4)
+      log_status "ERROR network filesystem output is not allowed output_root=$OUTPUT_ROOT fstype=$fs_type"
+      exit 1
+      ;;
+  esac
+}
+
+check_output_storage
 
 gpu_uuid() {
   nvidia-smi -i "$1" --query-gpu=uuid --format=csv,noheader,nounits 2>/dev/null \
@@ -85,7 +113,7 @@ resolve_job() {
   fi
 
   name="${model_tag}_${dataset}_gpt5_b600_fullft_selector_smooth_a010_pool100_stage4stratfull"
-  out="$ROOT/outputs/$name"
+  out="$OUTPUT_ROOT/$name"
   log="$LOG_ROOT/$name.log"
 }
 
