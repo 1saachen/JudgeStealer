@@ -1,78 +1,73 @@
-# Qwen3-8B GPT4All Four-Stage Launcher Design
+# Qwen3-8B GPT4All 四阶段启动脚本设计
 
-## Goal
+## 目标
 
-Add one single-purpose launcher for the existing Qwen3-8B, GPT4All GPT-5
-experiment. The launcher must preserve the training configuration from
-`launch_qwen3_gpt5_selector_smooth_lora_table_20260814.sh` while using the
-portable model and dataset paths on the new server.
+为现有的 Qwen3-8B、GPT4All GPT-5 实验新增一个单用途启动脚本。脚本需要
+完整保留 `launch_qwen3_gpt5_selector_smooth_lora_table_20260814.sh` 中对应
+实验的训练配置，同时改用新服务器上的可移植模型和数据路径。
 
-## Scope
+## 范围
 
-Create `launch_qwen3_8b_gpt4all_gpt5_four_stage.sh` at the repository root.
-Do not change the multi-job launcher or Python training code. The new script
-will run exactly one experiment and will accept one positional argument: the
-physical GPU index passed to `CUDA_VISIBLE_DEVICES`.
+在仓库根目录创建 `launch_qwen3_8b_gpt4all_gpt5_four_stage.sh`。不修改原有
+多任务启动脚本，也不修改 Python 训练代码。新脚本只运行一个实验，并且只
+接收一个位置参数：传给 `CUDA_VISIBLE_DEVICES` 的物理 GPU 编号。
 
-## Paths
+## 路径
 
-- Training script:
+- 训练脚本：
   `run_pointwise5answers_three_stage_pairwise_listwise_sft_v1.py`
-- Model: `models/Qwen3-8B`
-- Training data:
+- 模型：`models/Qwen3-8B`
+- 训练数据：
   `data/gpt4all/gpt5/train9k_pointwise_pairwise_no_val_overlap.json`
-- Evaluation data: `data/gpt4all/gpt5/val3k_pairwise_listwise.json`
-- Outputs: `outputs/qwen3_8b_gpt4all_gpt5_b600_selector_smooth_a010_pool100_stage4stratfull`
-- Logs: `outputs/qwen3_8b_gpt4all_gpt5_four_stage_logs/`
+- 验证数据：`data/gpt4all/gpt5/val3k_pairwise_listwise.json`
+- 结果目录：
+  `outputs/qwen3_8b_gpt4all_gpt5_b600_selector_smooth_a010_pool100_stage4stratfull`
+- 日志目录：`outputs/qwen3_8b_gpt4all_gpt5_four_stage_logs/`
 
-All paths are resolved relative to the launcher location so the repository can
-be moved without editing absolute paths.
+所有路径都相对于启动脚本所在位置解析，因此仓库移动后不需要修改绝对路径。
 
-## Training Configuration
+## 训练配置
 
-The launcher will preserve these settings from the reference table launcher:
+启动脚本将保留原表格实验启动脚本中的以下设置：
 
-- seed 42 and budget 600;
-- Stage 1 reuses the LM-head bias-trap selection proxy;
-- Stage 2 trains pairwise with no pointwise replay;
-- Stage 3 trains listwise with no pointwise or pairwise replay;
-- Stage 4 uses `stratified_triple`, replay fraction 1.0, and one epoch;
-- one epoch each for pointwise, pairwise, and listwise training;
-- LoRA with 4-bit loading;
-- per-device batch size 1 and gradient accumulation 16;
-- learning rate `1e-4`, maximum length 4096, and evaluation batch size 1;
-- final-stage-only evaluation;
-- local-Gaussian smoothing with alpha 0.1 and sigma 1.0 for all stages;
-- bias-trap pointwise selection with LM-head proxy reuse, init 80, query batch
-  20, candidate pool 100, no exploration, diversity 1.0, uncertainty 0.25,
-  and bias 1.0;
-- `BAAI/bge-small-en-v1.5` embeddings with the original embedding and proxy
-  settings.
+- 随机种子 42，预算 600；
+- Stage 1 复用 LM-head bias-trap 选样代理模型；
+- Stage 2 训练 pairwise，不回放 pointwise；
+- Stage 3 训练 listwise，不回放 pointwise 或 pairwise；
+- Stage 4 使用 `stratified_triple`，回放比例 1.0，训练 1 个 epoch；
+- pointwise、pairwise 和 listwise 各训练 1 个 epoch；
+- 使用 LoRA 和 4-bit 加载；
+- 单卡 batch size 为 1，梯度累积步数为 16；
+- 学习率 `1e-4`，最大长度 4096，评估 batch size 为 1；
+- 只在最终阶段完成后评估；
+- 所有阶段使用 local-Gaussian 平滑，alpha 为 0.1，sigma 为 1.0；
+- 使用 bias-trap pointwise selector，并复用 LM-head 代理模型：初始样本 80、
+  每轮查询 20、候选池 100、无随机探索、diversity 权重 1.0、uncertainty
+  权重 0.25、bias 权重 1.0；
+- 使用 `BAAI/bge-small-en-v1.5` embedding，并保留原脚本中的 embedding
+  和代理模型参数。
 
-## Runtime Behavior
+## 运行行为
 
-The script will:
+启动脚本将执行以下操作：
 
-1. Validate that the GPU argument is present.
-2. Validate the training script, model directory, model `config.json`, and two
-   dataset files before starting.
-3. Use `PYTHON_BIN` when supplied, otherwise use `python` from the activated
-   Conda environment.
-4. Refuse to overwrite an incomplete output directory.
-5. Skip the run when `metrics_compact.json` already exists.
-6. Refuse to launch a duplicate process targeting the same output directory.
-7. Record start, completion, and failure status in a status log and write the
-   full training output to a dedicated log file.
-8. Return a nonzero exit code when validation or training fails.
+1. 检查是否提供 GPU 编号。
+2. 启动前检查训练脚本、模型目录、模型 `config.json` 和两个数据文件是否存在。
+3. 如果设置了 `PYTHON_BIN`，则使用该解释器；否则使用当前已激活 Conda
+   环境中的 `python`。
+4. 如果存在未完成的结果目录，拒绝覆盖。
+5. 如果结果目录中已经存在 `metrics_compact.json`，跳过本次运行。
+6. 如果已有进程正在写入同一个结果目录，拒绝重复启动。
+7. 在状态日志中记录开始、完成和失败状态，并把完整训练输出写入独立日志文件。
+8. 参数检查或训练失败时返回非零退出码。
 
-The launcher will not download models or datasets automatically.
+启动脚本不会自动下载模型或数据集。
 
-## Verification
+## 验证方式
 
-Add a focused static test that checks the launcher uses the required portable
-paths, exact four-stage replay configuration, model size, selector settings,
-and smoothing settings, and that it does not reference the legacy `qwen/` or
-`Dolly/` paths. Run a Bash syntax check where Bash is available. Existing
-Python training tests are outside this configuration-only change and will not
-be run unless requested.
+新增一个聚焦的静态测试，用来检查启动脚本是否包含正确的可移植路径、准确的
+四阶段回放配置、模型尺寸、selector 参数和平滑参数，同时确保脚本不再引用
+旧的 `qwen/` 或 `Dolly/` 路径。在能够使用 Bash 的环境中额外执行 Bash 语法
+检查。现有 Python 训练测试不属于本次纯配置改动的范围，除非用户另行要求，
+否则不运行。
 
