@@ -1,21 +1,21 @@
-# Qwen3-8B Local Output Implementation Plan
+# Qwen3-8B 本地输出实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **供执行代理使用：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项执行，并用复选框跟踪进度。
 
-**Goal:** Make the Qwen3-8B GPT4All launcher write outputs, logs, and checkpoints to local storage by default and reject NFS output paths.
+**目标：** 让 Qwen3-8B GPT4All 启动器默认把输出、日志和 checkpoint 写入本地磁盘，并拒绝 NFS 输出路径。
 
-**Architecture:** Keep code, model, and dataset paths rooted in the repository. Introduce an overridable absolute `OUTPUT_ROOT`, derive both experiment and log directories from it, and perform a filesystem preflight before launching Python.
+**架构：** 代码、模型和数据路径仍位于仓库目录。增加可覆盖的绝对路径 `OUTPUT_ROOT`，实验输出和日志目录均从它派生，并在启动 Python 前检查文件系统。
 
-**Tech Stack:** Bash, `findmnt`, `df`, Python/pytest static launcher tests
+**技术栈：** Bash、`findmnt`、`df`、Python/pytest 静态启动器测试
 
 ---
 
-### Task 1: Specify local output behavior with failing tests
+### 任务 1：用失败测试约束本地输出行为
 
-**Files:**
-- Modify: `tests/test_qwen3_8b_gpt4all_launcher.py`
+**文件：**
+- 修改：`tests/test_qwen3_8b_gpt4all_launcher.py`
 
-- [ ] **Step 1: Add tests for the default path and NFS guard**
+- [ ] **步骤 1：增加默认路径和 NFS 防护测试**
 
 ```python
 def test_launcher_defaults_outputs_and_logs_to_local_storage():
@@ -37,32 +37,32 @@ def test_launcher_reports_storage_and_rejects_nfs_outputs():
     assert 'ERROR network filesystem output is not allowed' in text
 ```
 
-- [ ] **Step 2: Run the new tests and verify RED**
+- [ ] **步骤 2：运行新测试，确认处于 RED 状态**
 
-Run:
+运行：
 
 ```bash
 python -m pytest -q tests/test_qwen3_8b_gpt4all_launcher.py
 ```
 
-Expected: the two new tests fail because the launcher still derives `OUT` and `LOG_ROOT` from `$ROOT/outputs` and has no filesystem preflight.
+预期：两个新测试失败，因为启动器仍从 `$ROOT/outputs` 派生 `OUT` 和 `LOG_ROOT`，且尚未实现文件系统预检查。
 
-- [ ] **Step 3: Commit the failing tests**
+- [ ] **步骤 3：提交失败测试**
 
 ```bash
 git add tests/test_qwen3_8b_gpt4all_launcher.py
 git commit -m "Test local output guard for Qwen3-8B launcher"
 ```
 
-### Task 2: Route writes to local storage
+### 任务 2：将写入路径切换到本地磁盘
 
-**Files:**
-- Modify: `launch_qwen3_8b_gpt4all_gpt5_four_stage.sh`
-- Test: `tests/test_qwen3_8b_gpt4all_launcher.py`
+**文件：**
+- 修改：`launch_qwen3_8b_gpt4all_gpt5_four_stage.sh`
+- 测试：`tests/test_qwen3_8b_gpt4all_launcher.py`
 
-- [ ] **Step 1: Derive all writable paths from `OUTPUT_ROOT`**
+- [ ] **步骤 1：从 `OUTPUT_ROOT` 派生所有可写路径**
 
-Replace the existing `OUT` and `LOG_ROOT` definitions with:
+将现有的 `OUT` 和 `LOG_ROOT` 定义替换为：
 
 ```bash
 DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"
@@ -73,7 +73,7 @@ STATUS_LOG="$LOG_ROOT/job_status.log"
 LOG="$LOG_ROOT/$NAME.log"
 ```
 
-- [ ] **Step 2: Add the filesystem preflight after `log_status`**
+- [ ] **步骤 2：在 `log_status` 后增加文件系统预检查**
 
 ```bash
 check_output_storage() {
@@ -101,72 +101,72 @@ check_output_storage() {
 check_output_storage
 ```
 
-Keep `mkdir -p "$LOG_ROOT"` before this function is called so the default directory exists before `findmnt` and `df` inspect it.
+保留位于此函数调用之前的 `mkdir -p "$LOG_ROOT"`，使默认目录在 `findmnt` 和 `df` 检查前已经存在。
 
-- [ ] **Step 3: Run the launcher tests and verify GREEN**
+- [ ] **步骤 3：运行启动器测试，确认处于 GREEN 状态**
 
-Run:
+运行：
 
 ```bash
 python -m pytest -q tests/test_qwen3_8b_gpt4all_launcher.py
 ```
 
-Expected: `6 passed`.
+预期：`6 passed`。
 
-- [ ] **Step 4: Verify Bash syntax**
+- [ ] **步骤 4：验证 Bash 语法**
 
-Run:
+运行：
 
 ```bash
 bash -n launch_qwen3_8b_gpt4all_gpt5_four_stage.sh
 ```
 
-Expected: exit status 0 with no output.
+预期：退出状态为 0，且没有输出。
 
-- [ ] **Step 5: Inspect the focused diff**
+- [ ] **步骤 5：检查聚焦后的差异**
 
-Run:
+运行：
 
 ```bash
 git diff --check
 git diff -- launch_qwen3_8b_gpt4all_gpt5_four_stage.sh tests/test_qwen3_8b_gpt4all_launcher.py
 ```
 
-Expected: only local-output routing, storage preflight, and their tests are changed.
+预期：只有本地输出路由、存储预检查及其测试发生变化。
 
-- [ ] **Step 6: Commit the implementation**
+- [ ] **步骤 6：提交实现**
 
 ```bash
 git add launch_qwen3_8b_gpt4all_gpt5_four_stage.sh tests/test_qwen3_8b_gpt4all_launcher.py
 git commit -m "Write Qwen3-8B experiment outputs to local storage"
 ```
 
-### Task 3: Final verification and publication
+### 任务 3：最终验证与推送
 
-**Files:**
-- Verify: `launch_qwen3_8b_gpt4all_gpt5_four_stage.sh`
-- Verify: `tests/test_qwen3_8b_gpt4all_launcher.py`
+**文件：**
+- 验证：`launch_qwen3_8b_gpt4all_gpt5_four_stage.sh`
+- 验证：`tests/test_qwen3_8b_gpt4all_launcher.py`
 
-- [ ] **Step 1: Run focused regression tests**
+- [ ] **步骤 1：运行聚焦回归测试**
 
 ```bash
 python -m pytest -q tests/test_qwen3_8b_gpt4all_launcher.py tests/test_skywork_dataset.py
 ```
 
-Expected: all focused tests pass.
+预期：所有聚焦测试通过。
 
-- [ ] **Step 2: Confirm unrelated user files remain untouched**
+- [ ] **步骤 2：确认用户无关文件未被改动**
 
 ```bash
 git status --short
 ```
 
-Expected: only the pre-existing untracked `PROJECT_MEMORY.md`, `WORK_LOG.md`, and `launch_qwen3_gpt5_selector_smooth_lora_table_20260814.sh` remain.
+预期：只保留原先未跟踪的 `PROJECT_MEMORY.md`、`WORK_LOG.md` 和 `launch_qwen3_gpt5_selector_smooth_lora_table_20260814.sh`。
 
-- [ ] **Step 3: Push the commits**
+- [ ] **步骤 3：推送提交**
 
 ```bash
 git push origin main
 ```
 
-Expected: `main` is updated on GitHub without modifying the three unrelated untracked files.
+预期：GitHub 上的 `main` 已更新，且三个无关的未跟踪文件没有被改动。
