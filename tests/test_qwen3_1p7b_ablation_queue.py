@@ -85,6 +85,36 @@ def test_queue_encodes_each_ablation_control():
         assert fragment in text
 
 
+def test_each_variant_changes_exactly_the_planned_controls():
+    text = launcher_text()
+    case_block = re.search(r'case "\$variant" in(.*?)\n  esac', text, re.S).group(1)
+    actual = {}
+    for variant, body in re.findall(r"\n    ([a-z0-9_]+)\) (.*?) ;;", case_block):
+        actual[variant] = dict(re.findall(r"([a-z0-9_]+)=([a-z0-9_.]+)", body))
+
+    expected = {
+        "selector_random": {"selector_kind": "random", "reuse_proxy": "0"},
+        "selector_no_uncertainty": {"uncertainty_weight": "0"},
+        "selector_no_diversity": {"diversity_weight": "0"},
+        "selector_no_bias": {"bias_weight": "0"},
+        "selector_uncertainty_only": {"diversity_weight": "0", "bias_weight": "0"},
+        "selector_diversity_only": {"uncertainty_weight": "0", "bias_weight": "0"},
+        "selector_bias_only": {"diversity_weight": "0", "uncertainty_weight": "0"},
+        "smoothing_a000": {"smooth_alpha": "0"},
+        "smoothing_a001": {"smooth_alpha": "0.01"},
+        "smoothing_a005": {"smooth_alpha": "0.05"},
+        "smoothing_a020": {"smooth_alpha": "0.20"},
+        "smoothing_adaptive": {"adaptive_smoothing": "1"},
+        "reviewing_none": {"stage4_strategy": "none"},
+        "budget_b0p5": {"budget_percent": "0.5"},
+        "budget_b1": {"budget_percent": "1"},
+        "budget_b2": {"budget_percent": "2"},
+        "budget_b5": {"budget_percent": "5"},
+        "budget_b10": {"budget_percent": "10"},
+    }
+    assert actual == expected
+
+
 def test_queue_uses_local_output_guards_and_auto_gpu_dispatch():
     text = launcher_text()
     for fragment in (
@@ -93,8 +123,11 @@ def test_queue_uses_local_output_guards_and_auto_gpu_dispatch():
         "nfs|nfs4",
         "--query-compute-apps=gpu_uuid",
         "--query-gpu=memory.used",
+        'exec {job_lock_fd}>"$LOG_ROOT/.job_${job}.lock"',
+        'flock -n "$job_lock_fd"',
         'if [[ -f "$out/metrics_compact.json" ]]',
         'if [[ -e "$out" ]]',
         'sleep "$POLL_SECONDS"',
     ):
         assert fragment in text
+    assert 'grep -F -- "--out $out"' not in text

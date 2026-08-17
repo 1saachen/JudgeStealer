@@ -200,6 +200,7 @@ run_job() {
   local dataset="" model="" train="" eval="" name="" out="" log=""
   local selector_kind="" reuse_proxy=0 diversity_weight=0 uncertainty_weight=0 bias_weight=0
   local smooth_alpha=0 adaptive_smoothing=0 stage4_strategy="" budget_percent=0 rc
+  local job_lock_fd
   local -a extra_args=()
 
   if ! resolve_job "$job"; then
@@ -220,16 +221,21 @@ run_job() {
       return 1
     fi
   done
-  if [[ -f "$out/metrics_compact.json" ]]; then
-    log_status "SKIP completed job=$job out=$out"
+
+  exec {job_lock_fd}>"$LOG_ROOT/.job_${job}.lock"
+  if ! flock -n "$job_lock_fd"; then
+    log_status "SKIP locked job=$job out=$out"
+    exec {job_lock_fd}>&-
     return 0
   fi
-  if ps -eo args --cols 4096 | grep -F -- "--out $out" | grep -v grep >/dev/null 2>&1; then
-    log_status "SKIP running job=$job out=$out"
+  if [[ -f "$out/metrics_compact.json" ]]; then
+    log_status "SKIP completed job=$job out=$out"
+    exec {job_lock_fd}>&-
     return 0
   fi
   if [[ -e "$out" ]]; then
     log_status "ERROR incomplete output exists job=$job out=$out"
+    exec {job_lock_fd}>&-
     return 1
   fi
 
@@ -306,12 +312,14 @@ run_job() {
 
   if [[ "$rc" -eq 0 && -f "$out/metrics_compact.json" ]]; then
     log_status "DONE job=$job gpu=$gpu out=$out"
+    exec {job_lock_fd}>&-
     return 0
   fi
   if [[ "$rc" -eq 0 ]]; then
     rc=1
   fi
   log_status "ERROR job=$job gpu=$gpu rc=$rc out=$out log=$log"
+  exec {job_lock_fd}>&-
   return "$rc"
 }
 
