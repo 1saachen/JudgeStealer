@@ -2645,9 +2645,9 @@ def _load_listwise_eval_dataset(path: str) -> Tuple[List[ListwiseExample], List[
 
         instruction = str(_first_nonempty(rec, ("Instruction", "instruction", "question"), ""))
         input_text = str(_first_nonempty(rec, ("input", "input_text", "context"), ""))
-        output_a = str(_first_nonempty(rec, ("outputA", "output_a", "assistant_a", "responseA"), ""))
-        output_b = str(_first_nonempty(rec, ("outputB", "output_b", "assistant_b", "responseB"), ""))
-        output_c = str(_first_nonempty(rec, ("outputC", "output_c", "assistant_c", "responseC"), ""))
+        output_a = str(_first_nonempty(rec, ("outputA", "output_a", "assistant_a", "responseA", "answerA"), ""))
+        output_b = str(_first_nonempty(rec, ("outputB", "output_b", "assistant_b", "responseB", "answerB"), ""))
+        output_c = str(_first_nonempty(rec, ("outputC", "output_c", "assistant_c", "responseC", "answerC"), ""))
         if not output_a.strip() or not output_b.strip() or not output_c.strip():
             stats["skipped_missing_output"] += 1
             continue

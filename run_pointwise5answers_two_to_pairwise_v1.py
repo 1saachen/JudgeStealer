@@ -1057,12 +1057,18 @@ def _load_scored_questions(
                 for ans_key in ("A", "B", "C", "D", "E"):
                     model_key = f"model{ans_key}"
                     output_key = f"output{ans_key}"
+                    answer_key = f"answer{ans_key}"
                     score_key = f"score{ans_key}"
-                    if model_key not in rec and output_key not in rec and score_key not in rec:
+                    if (
+                        model_key not in rec
+                        and output_key not in rec
+                        and answer_key not in rec
+                        and score_key not in rec
+                    ):
                         continue
                     model_row = {
-                        "model": rec.get(model_key, ""),
-                        "output": rec.get(output_key, ""),
+                        "model": rec.get(model_key, ans_key),
+                        "output": rec.get(output_key, rec.get(answer_key, "")),
                     }
                     if score_key in rec:
                         model_row["score"] = rec.get(score_key, None)
@@ -2703,7 +2709,7 @@ def _abc_choice_to_pairwise_label(choice: Any) -> int:
         return int(LABEL_TIE)
     if choice_s.lower() in {"tie", "t", "equal", "same"}:
         return int(LABEL_TIE)
-    return int(LABEL_TIE)
+    raise ValueError(f"unknown pairwise choice: {choice!r}")
 
 
 def _build_pairwise_abc_examples_from_records(
@@ -2721,6 +2727,8 @@ def _build_pairwise_abc_examples_from_records(
         "input_records": int(len(records)),
         "generated_pairs": 0,
         "skipped_missing_output": 0,
+        "skipped_missing_choice": 0,
+        "invalid_choice": 0,
         "label_A": 0,
         "label_B": 0,
         "label_C": 0,
@@ -2750,8 +2758,10 @@ def _build_pairwise_abc_examples_from_records(
             ("AC", "modelA", "outputA", "modelC", "outputC", ("choice_AC", "choiceAC", "pairwise_ac_choice")),
         )
         for pair_name, model_a_key, out_a_key, model_b_key, out_b_key, choice_keys in pair_specs:
-            out_a = str(rec.get(out_a_key, ""))
-            out_b = str(rec.get(out_b_key, ""))
+            out_a_position = str(out_a_key)[-1]
+            out_b_position = str(out_b_key)[-1]
+            out_a = str(rec.get(out_a_key, rec.get(f"answer{out_a_position}", "")))
+            out_b = str(rec.get(out_b_key, rec.get(f"answer{out_b_position}", "")))
             if not out_a.strip() or not out_b.strip():
                 stats["skipped_missing_output"] += 1
                 continue
@@ -2777,7 +2787,14 @@ def _build_pairwise_abc_examples_from_records(
                         raw_choice = nested_value
             if pair_name == "AB" and (raw_choice is None or str(raw_choice).strip() == ""):
                 raw_choice = rec.get("choice", rec.get("raw_choice", ""))
-            label = _abc_choice_to_pairwise_label(raw_choice)
+            if raw_choice is None or str(raw_choice).strip() == "":
+                stats["skipped_missing_choice"] += 1
+                continue
+            try:
+                label = _abc_choice_to_pairwise_label(raw_choice)
+            except ValueError:
+                stats["invalid_choice"] += 1
+                raise
             token = label_to_token(int(label))
             if int(label) == int(LABEL_A):
                 stats["label_A"] += 1
@@ -2787,8 +2804,8 @@ def _build_pairwise_abc_examples_from_records(
                 stats["label_C"] += 1
 
             pair_id += 1
-            model_a = str(rec.get(model_a_key, model_a_key))
-            model_b = str(rec.get(model_b_key, model_b_key))
+            model_a = str(rec.get(model_a_key, out_a_position))
+            model_b = str(rec.get(model_b_key, out_b_position))
             prompt = build_pairwise_prompt(
                 system_prompt=pairwise_system_prompt,
                 instruction=instruction,
