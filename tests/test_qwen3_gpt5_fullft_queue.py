@@ -115,3 +115,10 @@ def test_queue_protects_existing_outputs_and_continues_failures():
     assert 'grep -F -- "--out $out"' in text
     assert "overall_rc=1" in text
     assert "job_status.log" in text
+
+
+def test_queue_supports_explicit_job_skips_before_gpu_assignment():
+    text = launcher_text()
+    assert 'SKIP_JOBS="${SKIP_JOBS:-}"' in text
+    assert "should_skip_job()" in text
+    assert 'SKIP configured job=$job' in text

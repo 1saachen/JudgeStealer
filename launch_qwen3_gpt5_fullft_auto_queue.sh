@@ -10,6 +10,7 @@ LOG_ROOT="$OUTPUT_ROOT/qwen3_gpt5_fullft_auto_queue_logs"
 STATUS_LOG="$LOG_ROOT/job_status.log"
 POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
+SKIP_JOBS="${SKIP_JOBS:-}"
 
 if [[ "$#" -eq 0 ]]; then
   echo "usage: $0 <gpu_id> [gpu_id ...]" >&2
@@ -59,6 +60,14 @@ check_output_storage() {
 }
 
 check_output_storage
+
+should_skip_job() {
+  local candidate="$1" skipped
+  for skipped in $SKIP_JOBS; do
+    [[ "$skipped" == "$candidate" ]] && return 0
+  done
+  return 1
+}
 
 gpu_uuid() {
   nvidia-smi -i "$1" --query-gpu=uuid --format=csv,noheader,nounits 2>/dev/null \
@@ -247,6 +256,12 @@ next_job_index=0
 active_workers=0
 overall_rc=0
 while (( next_job_index < ${#JOBS[@]} || active_workers > 0 )); do
+  while (( next_job_index < ${#JOBS[@]} )) && should_skip_job "${JOBS[$next_job_index]}"; do
+    job="${JOBS[$next_job_index]}"
+    log_status "SKIP configured job=$job"
+    next_job_index=$((next_job_index + 1))
+  done
+
   for gpu in "${!GPU_WORKER_PIDS[@]}"; do
     pid="${GPU_WORKER_PIDS[$gpu]}"
     if ! kill -0 "$pid" 2>/dev/null; then
