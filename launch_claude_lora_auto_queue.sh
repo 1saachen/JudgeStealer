@@ -130,7 +130,7 @@ resolve_job() {
   case "$model_key" in
     llama1b)
       model_tag=llama3p2_1b
-      model="$ROOT/models/Llama-3.2-1B-Instruct"
+      model="$ROOT/models/Llama-3.2-1b-instruct"
       ;;
     qwen1p7b)
       model_tag=qwen3_1p7b
