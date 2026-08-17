@@ -219,6 +219,20 @@ def test_queue_uses_current_gpt5_data_paths():
     assert '$ROOT/data/gpt4all/gpt5/val3k_pairwise_listwise.json' in text
 
 
+def test_queue_writes_outputs_and_logs_to_overridable_nvme_storage():
+    text = launcher_text()
+    assert (
+        'DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/'
+        'JudgeStealer_outputs"' in text
+    )
+    assert 'OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"' in text
+    assert 'out="$OUTPUT_ROOT/$name"' in text
+    assert 'LOG_ROOT="$OUTPUT_ROOT/qwen3_gpt5_fullft_auto_queue_logs"' in text
+    assert "check_output_storage" in text
+    assert 'findmnt -n -o FSTYPE -T "$OUTPUT_ROOT"' in text
+    assert "nfs|nfs4" in text
+
+
 def test_queue_runs_fullft_selector_with_exact_training_configuration():
     text = launcher_text()
     required = [
@@ -302,6 +316,9 @@ Create `launch_qwen3_gpt5_fullft_auto_queue.sh` with `set -uo pipefail`, reposit
 paths, the allowlist usage check, and these scheduler constants:
 
 ```bash
+DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"
+LOG_ROOT="$OUTPUT_ROOT/qwen3_gpt5_fullft_auto_queue_logs"
 POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
 JOBS=(
@@ -371,7 +388,7 @@ resolve_job() {
     eval="$ROOT/data/gpt4all/gpt5/val3k_pairwise_listwise.json"
   fi
   name="${model_tag}_${dataset}_gpt5_b600_fullft_selector_smooth_a010_pool100_stage4stratfull"
-  out="$ROOT/outputs/$name"
+  out="$OUTPUT_ROOT/$name"
   log="$LOG_ROOT/$name.log"
 }
 ```
@@ -570,5 +587,6 @@ cd /data/model-extraction-attack/yaolin/JudgeStealer
 Detach with `Ctrl-b d`. Follow queue state with:
 
 ```bash
-tail -f outputs/qwen3_gpt5_fullft_auto_queue_logs/job_status.log
+tail -f /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs/\
+qwen3_gpt5_fullft_auto_queue_logs/job_status.log
 ```

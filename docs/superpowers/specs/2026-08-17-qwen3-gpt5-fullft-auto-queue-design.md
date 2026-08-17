@@ -41,7 +41,13 @@ GPU 中选择真正空闲的卡，一张卡同时最多运行一项实验，并�
 
 每项实验使用不同输出目录，名称包含模型规模、数据集、`gpt5`、`b600`、
 `fullft`、`selector`、平滑配置和 Stage 4 配置。Full-FT 结果不得覆盖已有 LoRA
-结果。
+结果。默认输出根目录统一使用本地 NVMe：
+
+```text
+/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs
+```
+
+可通过环境变量 `OUTPUT_ROOT` 覆盖，以适配其他服务器。
 
 ## Full-FT Selector
 
@@ -165,11 +171,13 @@ GPU 只有同时满足以下条件才视为空闲：
 日志目录统一位于：
 
 ```text
-outputs/qwen3_gpt5_fullft_auto_queue_logs/
+$OUTPUT_ROOT/qwen3_gpt5_fullft_auto_queue_logs/
 ```
 
 其中包含共享 `job_status.log` 和每项实验各自的训练日志。状态日志至少记录
 `START`、`DONE`、`SKIP` 和 `ERROR`，并包含 job、GPU、输出目录和错误码。
+启动器使用 `findmnt` 记录输出文件系统类型，并拒绝把完整模型 checkpoint 写入
+`nfs` 或 `nfs4`；同时使用 `df` 把 NVMe 剩余容量写入状态日志。
 
 ## 测试与验证
 
