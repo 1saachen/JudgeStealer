@@ -3,8 +3,8 @@
 ## 目标
 
 让现有三阶段 SFT 训练入口直接读取已经解压的 GPT-5、Claude Alpaca 和
-Claude GPT4ALL JSON，同时保证外部 pairwise/listwise 验证只使用数据中已有的
-judge 金标，不再从 pointwise score 或其他任务标签推导。
+Claude GPT4ALL JSON，并在显式传入 pairwise 验证文件时只使用数据中已有的
+judge 金标，不把缺失的 AC 选择解释为 tie。
 
 ## 范围
 
@@ -13,12 +13,12 @@ judge 金标，不再从 pointwise score 或其他任务标签推导。
 - GPT-5 的 `outputA/outputB/outputC` 与 Claude 的
   `answerA/answerB/answerC` 字段兼容；
 - 外部 pairwise 验证的显式标签读取；
-- 外部 listwise 验证的显式 ranking 读取；
-- 三阶段入口和现有启动脚本的验证参数；
+- 外部 listwise 验证的回答字段兼容；
 - 聚焦的数据 loader 回归测试与修改后的数据一致性报告。
 
 训练脚本仍只读取普通 JSON，不直接读取 ZIP，也不改写原始 judge 导出文件。
 训练阶段从 pointwise score 构造 pairwise/listwise 训练标签的现有逻辑保持不变。
+三阶段入口和现有启动脚本不在修改范围内；新的启动脚本由用户单独编写。
 
 ## 规范化边界
 
@@ -42,8 +42,9 @@ pointwise 验证继续使用训练数据内部划分记录上已有的 score。�
 
 ### Pairwise
 
-三阶段入口必须收到非空的 `--pairwise-eval-dataset`。不再把
-`--listwise-eval-dataset` 当作 pairwise 标签来源。
+本次运行的新启动脚本必须同时传入 `--pairwise-eval-dataset` 和
+`--listwise-eval-dataset`。三阶段入口已有的可选 fallback 保持不变，以免改变
+旧实验命令；只要显式传入 pairwise 路径，就会走显式 pairwise loader。
 
 显式 pairwise loader 支持现有别名：
 
@@ -60,16 +61,15 @@ pointwise 验证继续使用训练数据内部划分记录上已有的 score。�
 
 ### Listwise
 
-外部 listwise loader 必须从 `ranking`、`listwise_ranking`、`raw_ranking` 或
-`label_ranking` 取得合法的显式 ranking。缺少 ranking 时跳过并最终按现有规则
-在零样本情况下报错；不再使用 `scoreA/scoreB/scoreC` 补出 ranking。
+现有 listwise loader 已经优先读取 `ranking`、`listwise_ranking`、
+`raw_ranking` 或 `label_ranking`，Claude 和 GPT-5 的验证文件都会走这个显式
+ranking 分支。本次只给回答文本增加 `answerA/answerB/answerC` 别名，不改变
+ranking 的优先级、fallback 或错误处理。
 
-## 三阶段入口和启动参数
+## 启动参数约定
 
-`run_pointwise5answers_three_stage_pairwise_listwise_sft_v1.py` 保留现有三个数据
-参数，但把 pairwise eval 从可选 fallback 改为必需输入。代码删除运行时
-“没有 pairwise 文件就从 listwise 文件生成”的分支，并始终调用显式 pairwise
-loader。
+`run_pointwise5answers_three_stage_pairwise_listwise_sft_v1.py` 不做修改。新启动
+脚本负责显式传入正确的数据参数，从而避开旧的 pairwise fallback。
 
 GPT-5 Alpaca 运行分别传入：
 
@@ -81,8 +81,8 @@ Claude Alpaca 运行将 `data/Alpaca-claude/val.json` 同时传给 pairwise 和
 listwise 参数，因为该文件同时包含两类显式标签。Claude GPT4ALL 同样使用
 `data/GPT4ALL-claude/val.json`。
 
-现有 launcher 必须新增 pairwise 路径检查和 `--pairwise-eval-dataset` 参数，
-避免继续触发旧 fallback。
+现有 launcher 保持原样。用户新写的 Claude launcher 必须同时传入 pairwise 和
+listwise 验证路径；本次实现不创建或修改 launcher。
 
 ## 数据一致性报告
 
@@ -105,8 +105,8 @@ GPT4ALL 只做自身结构与标签完整性检查。
 - 训练记录少于三个有效 scored answers 时沿用现有失败行为；
 - 显式 pairwise 非空但未知的 choice 立即报错，防止静默制造 tie；
 - 显式 pairwise 文件零有效样本时报错；
-- 显式 listwise 文件零有效 ranking 样本时报错；
-- 统计中区分缺失输出、缺失 choice、非法 choice 和缺失 ranking。
+- 显式 listwise 的现有错误行为保持不变；
+- pairwise 统计中区分缺失输出、缺失 choice 和非法 choice。
 
 ## 测试
 
@@ -117,9 +117,7 @@ GPT4ALL 只做自身结构与标签完整性检查。
 3. 显式 choice `3` 仍生成真实 tie；
 4. 非空未知 choice 抛出异常；
 5. listwise loader 接受 `answerA/B/C` 和 `listwise_ranking`；
-6. 只有 score、没有 ranking 的外部 listwise 记录不会被推导；
-7. 三阶段入口缺少 `--pairwise-eval-dataset` 时明确失败；
-8. launcher 同时传入 pairwise 和 listwise 验证路径。
+6. GPT-5 风格的 `outputA/B/C` 和现有 ranking 行为不回归。
 
 测试先以当前行为运行并确认失败，再实施最小修改使其通过，最后运行相关测试和
 完整测试集。
