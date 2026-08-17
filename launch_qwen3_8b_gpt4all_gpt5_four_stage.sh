@@ -8,8 +8,10 @@ MODEL="$ROOT/models/Qwen3-8B"
 TRAIN_DATA="$ROOT/data/gpt4all/gpt5/train9k_pointwise_pairwise_no_val_overlap.json"
 EVAL_DATA="$ROOT/data/gpt4all/gpt5/val3k_pairwise_listwise.json"
 NAME="qwen3_8b_gpt4all_gpt5_b600_selector_smooth_a010_pool100_stage4stratfull"
-OUT="$ROOT/outputs/$NAME"
-LOG_ROOT="$ROOT/outputs/qwen3_8b_gpt4all_gpt5_four_stage_logs"
+DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"
+OUT="$OUTPUT_ROOT/$NAME"
+LOG_ROOT="$OUTPUT_ROOT/qwen3_8b_gpt4all_gpt5_four_stage_logs"
 STATUS_LOG="$LOG_ROOT/job_status.log"
 LOG="$LOG_ROOT/$NAME.log"
 
@@ -26,6 +28,30 @@ log_status() {
   { flock 9; echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] $*" | tee -a "$STATUS_LOG"; } \
     9>"$LOG_ROOT/.status.lock"
 }
+
+check_output_storage() {
+  local fs_type=""
+  local available="unknown"
+
+  if command -v findmnt >/dev/null 2>&1; then
+    fs_type="$(findmnt -n -o FSTYPE -T "$OUTPUT_ROOT" 2>/dev/null || true)"
+  else
+    log_status "WARNING findmnt unavailable; output filesystem type not checked"
+  fi
+  available="$(df -hP "$OUTPUT_ROOT" 2>/dev/null | awk 'NR == 2 {print $4}' || true)"
+  [[ -n "$available" ]] || available="unknown"
+  [[ -n "$fs_type" ]] || fs_type="unknown"
+
+  log_status "STORAGE output_root=$OUTPUT_ROOT fstype=$fs_type available=$available"
+  case "$fs_type" in
+    nfs|nfs4)
+      log_status "ERROR network filesystem output is not allowed output_root=$OUTPUT_ROOT fstype=$fs_type"
+      exit 1
+      ;;
+  esac
+}
+
+check_output_storage
 
 require_file() {
   if [[ ! -f "$1" ]]; then

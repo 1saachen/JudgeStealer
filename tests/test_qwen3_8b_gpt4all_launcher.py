@@ -75,3 +75,22 @@ def test_launcher_has_preflight_and_duplicate_run_guards():
     assert 'if [[ -f "$OUT/metrics_compact.json" ]]' in text
     assert 'if [[ -e "$OUT" ]]' in text
     assert 'grep -F -- "--out $OUT"' in text
+
+
+def test_launcher_defaults_outputs_and_logs_to_local_storage():
+    text = launcher_text()
+    assert (
+        'DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/'
+        'JudgeStealer_outputs"' in text
+    )
+    assert 'OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"' in text
+    assert 'OUT="$OUTPUT_ROOT/$NAME"' in text
+    assert 'LOG_ROOT="$OUTPUT_ROOT/qwen3_8b_gpt4all_gpt5_four_stage_logs"' in text
+
+
+def test_launcher_reports_storage_and_rejects_nfs_outputs():
+    text = launcher_text()
+    assert 'findmnt -n -o FSTYPE -T "$OUTPUT_ROOT"' in text
+    assert 'df -hP "$OUTPUT_ROOT"' in text
+    assert 'nfs|nfs4)' in text
+    assert 'ERROR network filesystem output is not allowed' in text
