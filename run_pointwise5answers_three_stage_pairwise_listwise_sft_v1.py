@@ -89,6 +89,7 @@ class RunConfig:
     candidate_selector_proxy_warmup_epochs: int
     candidate_selector_proxy_update_epochs: int
     candidate_selector_proxy_mode: str
+    candidate_selector_finetune_mode: str
     reuse_selection_proxy_for_stage1: bool
     candidate_bert_selector_model: str
     candidate_bert_selector_max_length: int
@@ -2002,6 +2003,12 @@ def parse_args() -> argparse.Namespace:
         help="Internal pointwise_proxy acquisition model. lm_head trains in score-token space.",
     )
     parser.add_argument(
+        "--candidate-selector-finetune-mode",
+        choices=["lora", "full"],
+        default="lora",
+        help="Train the active-selection proxy with LoRA adapters or all model parameters.",
+    )
+    parser.add_argument(
         "--reuse-selection-proxy-for-stage1",
         action="store_true",
         help=(
@@ -2215,6 +2222,7 @@ def main() -> None:
         candidate_selector_proxy_warmup_epochs=int(args.candidate_selector_proxy_warmup_epochs),
         candidate_selector_proxy_update_epochs=int(args.candidate_selector_proxy_update_epochs),
         candidate_selector_proxy_mode=str(args.candidate_selector_proxy_mode),
+        candidate_selector_finetune_mode=str(args.candidate_selector_finetune_mode),
         reuse_selection_proxy_for_stage1=bool(args.reuse_selection_proxy_for_stage1),
         candidate_bert_selector_model=str(args.candidate_bert_selector_model),
         candidate_bert_selector_max_length=int(args.candidate_bert_selector_max_length),
@@ -2354,6 +2362,10 @@ def main() -> None:
     if str(cfg.candidate_selector_kind) == "bias_trap_pointwise":
         if str(cfg.candidate_selector_target_task) != "pointwise":
             raise ValueError("bias_trap_pointwise selector requires --candidate-selector-target-task pointwise")
+    if str(cfg.candidate_selector_finetune_mode) == "full" and bool(cfg.load_in_4bit):
+        raise ValueError(
+            "--candidate-selector-finetune-mode full cannot be combined with --load-in-4bit"
+        )
     if bool(cfg.reuse_selection_proxy_for_stage1):
         if str(cfg.train_selection_mode) != "candidate_triple_selector":
             raise ValueError("--reuse-selection-proxy-for-stage1 requires --train-selection-mode candidate_triple_selector")

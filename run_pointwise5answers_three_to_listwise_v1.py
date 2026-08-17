@@ -1859,6 +1859,19 @@ class _FrozenLlamaFeatureProxy:
             return self._proxy.extract_features_tensor(inputs).detach()
 
 
+def _resolve_candidate_selector_finetune_mode(cfg: Any) -> str:
+    mode = str(getattr(cfg, "candidate_selector_finetune_mode", "lora"))
+    if mode not in {"lora", "full"}:
+        raise ValueError(
+            "candidate selector finetune mode must be one of {'lora','full'}"
+        )
+    if mode == "full" and bool(getattr(cfg, "load_in_4bit", False)):
+        raise ValueError(
+            "candidate selector full finetuning is incompatible with 4-bit loading"
+        )
+    return mode
+
+
 def _select_candidate_triples_with_selector(
     *,
     candidates: Sequence[CandidateTripleExample],
@@ -1971,7 +1984,7 @@ def _select_candidate_triples_with_selector(
             lr=float(cfg.proxy_lr),
             weight_decay=0.0,
             max_length=int(cfg.proxy_max_length),
-            finetune_mode="lora",
+            finetune_mode=_resolve_candidate_selector_finetune_mode(cfg),
             gradient_checkpointing=True,
             load_in_4bit=bool(cfg.load_in_4bit),
             score_min=int(cfg.score_min),
@@ -2416,6 +2429,7 @@ def _select_candidate_triples_with_selector(
         ),
         "proxy_warmup_epochs": int(getattr(cfg, "candidate_selector_proxy_warmup_epochs", 1)),
         "proxy_update_epochs": int(getattr(cfg, "candidate_selector_proxy_update_epochs", 1)),
+        "proxy_finetune_mode": _resolve_candidate_selector_finetune_mode(cfg),
         "round_diagnostics": round_diagnostics,
         "bert_selector_model": str(cfg.candidate_bert_selector_model),
         "bert_selector_max_length": int(cfg.candidate_bert_selector_max_length),
