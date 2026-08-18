@@ -1225,6 +1225,12 @@ def main() -> None:
         pair_policy_stats = {**pair_policy_stats, "format": "choice_only"}
         list_policy_stats = {"policy": "best_choice_soft_ties", "input": len(list_items), "kept": len(list_items)}
     else:
+        point_items = _pointwise_items(
+            point_answers,
+            smooth_alpha=float(args.smooth_alpha),
+            reward_mean=reward_mean,
+            decimals=int(args.reward_decimals),
+        )
         pair_train, pair_train_rows, pair_train_stats = _load_pairwise(pair_train_path)
         list_raw_for_training = list_raw_records
         list_augmentation_stats = {"enabled": False, "input_records": len(list_raw_records), "output_records": len(list_raw_records)}
