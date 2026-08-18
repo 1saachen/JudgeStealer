@@ -295,6 +295,7 @@ def _make_cfg(args: argparse.Namespace) -> three.RunConfig:
         pointwise_distance_weight=0.0,
         pointwise_class_weight_mode="none",
         pointwise_class_weight_strength=1.0,
+        budget_percent=0.0,
         budget_units=int(args.budget),
         pointwise_epochs=int(args.pointwise_epochs),
         pairwise_epochs=int(args.pairwise_epochs),
