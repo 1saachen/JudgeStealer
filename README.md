@@ -51,7 +51,7 @@ Model weights are not included. Either download them locally:
 models/
 ├── Qwen3-1.7B/
 ├── Qwen3-4B/
-└── Llama-3.2-1B-Instruct/
+└── Llama-3.2-1b-instruct/
 ```
 
 or pass a Hugging Face model ID to `--llama` if the machine has network access
@@ -99,6 +99,15 @@ python prepare_rewardmodel_three_stage.py \
 
 This creates `split1500_500/`, `mix200_eval300/`, and
 `three_stage_split.json` below the source directory.
+
+The reward-model three-stage entry point keeps continuous pointwise rewards
+and source pairwise choices. Equal-score pairwise rows use a soft two-winner
+target, while explicit `choice=C` remains a hard tie. Listwise SFT emits only
+the source best choice; equal top scores use a soft target over the tied best
+responses rather than a full ranking target.
+
+The LoRA table launcher and its data contract are documented in
+`docs/REWARDMODEL_LORA_EXPERIMENTS.md`.
 
 ## 5. Smoke-run the continuous mix experiment
 

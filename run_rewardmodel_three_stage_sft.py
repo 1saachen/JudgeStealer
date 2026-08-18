@@ -46,6 +46,11 @@ Evaluate helpfulness, relevance, accuracy, depth, creativity, and level of detai
 Give ONLY one numeric reward from 1 to 5. Decimal values are allowed.
 Use this exact format: Score: [X]"""
 
+BEST_CHOICE_SYSTEM_PROMPT = """You are an impartial judge evaluating three AI assistant responses.
+
+Choose the single best response. Return only the response ID using this exact
+format: Best: [Response1], Best: [Response2], or Best: [Response3]."""
+
 
 UNIRRM_SYSTEM_PROMPT = """You are a multilingual evaluation expert, responsible for conducting rigorous, objective, and multi-dimensional evaluations of responses generated for User Input.
 
@@ -130,6 +135,24 @@ def _unirm_prompt(
     )
 
 
+def _best_choice_prompt(record: Mapping[str, Any]) -> str:
+    return "\n".join(
+        [
+            "### System",
+            BEST_CHOICE_SYSTEM_PROMPT,
+            "",
+            "### User",
+            _unirm_user_prompt(
+                str(record.get("instruction", "")),
+                str(record.get("input", "")),
+                [str(record.get(f"output{letter}", "")) for letter in "ABC"],
+            ),
+            "",
+            "### Assistant",
+        ]
+    )
+
+
 def _unirm_target(scores: Sequence[float], best_id: str, *, decimals: int) -> str:
     evaluations = [
         {
@@ -158,6 +181,30 @@ def _best_response_id(choice: Any, labels: Sequence[str]) -> str:
     if match and 1 <= int(match.group(1)) <= len(labels):
         return f"Response{int(match.group(1))}"
     return "Tie"
+
+
+def _parse_best_choice(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if text.upper() in {"A", "B", "C"}:
+        return f"Response{'ABC'.index(text.upper()) + 1}"
+    response_match = re.search(r"\bResponse\s*([123])\b", text, re.IGNORECASE)
+    if response_match:
+        return f"Response{response_match.group(1)}"
+    choice_match = re.search(
+        r"\b(?:best(?:\s+choice)?|choice)\s*[:=]\s*\[?\s*([ABC])\s*\]?",
+        text,
+        re.IGNORECASE,
+    )
+    if choice_match:
+        return f"Response{'ABC'.index(choice_match.group(1).upper()) + 1}"
+    return None
+
+
+def _best_choice_target(choice: Any) -> Optional[str]:
+    response_id = _parse_best_choice(choice)
+    if response_id is None:
+        return None
+    return f"Best: [{response_id}]{base.DEFAULT_EOS_TOKEN}"
 
 
 def _extract_unirm_json(text: str) -> Optional[Mapping[str, Any]]:
@@ -259,56 +306,131 @@ def _native_pairwise_items(
             if not isinstance(pair, Mapping):
                 continue
             left, right = pair_name
-            left_score = _score_value(pair, f"score{left}")
-            right_score = _score_value(pair, f"score{right}")
-            if left_score is None or right_score is None:
-                continue
+            code = str(pair.get("choice_code", "")).strip()
+            if code not in {"1", "2", "3"}:
+                choice = str(pair.get("choice", "")).strip()
+                code = "1" if choice == left else "2" if choice == right else "3"
             items.append(
                 (
                     "pairwise",
-                    _unirm_prompt(
+                    base.build_pairwise_prompt(
+                        system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT,
                         instruction=str(record.get("instruction", "")),
                         input_text=str(record.get("input", "")),
-                        outputs=[str(record.get(f"output{left}", "")), str(record.get(f"output{right}", ""))],
+                        assistant_1_output=str(record.get(f"output{left}", "")),
+                        assistant_2_output=str(record.get(f"output{right}", "")),
                     ),
-                    _unirm_target(
-                        [left_score, right_score],
-                        _best_response_id(pair.get("choice_code", pair.get("choice")), ["1", "2"])
-                        if str(pair.get("choice_code", "")).strip()
-                        else _best_response_id(pair.get("choice"), [left, right]),
-                        decimals=decimals,
-                    ),
+                    f"[[{code}]]{base.DEFAULT_EOS_TOKEN}",
                     base.IGNORE_INDEX,
                 )
             )
     return items
 
 
-def _native_listwise_items(
-    records: Sequence[Mapping[str, Any]], *, decimals: int
+def _best_choice_listwise_items(
+    records: Sequence[Mapping[str, Any]],
 ) -> List[Tuple[str, str, str, int]]:
     items: List[Tuple[str, str, str, int]] = []
     for record in records:
-        scores = [_score_value(record, f"listwise_score{letter}") for letter in "ABC"]
-        if any(score is None for score in scores):
+        target = _best_choice_target(record.get("listwise_choice"))
+        if target is None:
             continue
         items.append(
             (
                 "listwise",
-                _unirm_prompt(
-                    instruction=str(record.get("instruction", "")),
-                    input_text=str(record.get("input", "")),
-                    outputs=[str(record.get(f"output{letter}", "")) for letter in "ABC"],
-                ),
-                _unirm_target(
-                    [float(score) for score in scores if score is not None],
-                    _best_response_id(record.get("listwise_choice"), list("ABC")),
-                    decimals=decimals,
-                ),
+                _best_choice_prompt(record),
+                target,
                 base.IGNORE_INDEX,
             )
         )
     return items
+
+
+def _best_choice_metrics(
+    true_choices: Sequence[Any], predicted_choices: Sequence[Optional[str]]
+) -> Dict[str, Any]:
+    if len(true_choices) != len(predicted_choices):
+        raise ValueError("true and predicted best-choice sequences must have equal length")
+    invalid = sum(choice is None for choice in predicted_choices)
+    correct = 0
+    for truth, predicted in zip(true_choices, predicted_choices):
+        allowed = [str(truth)] if isinstance(truth, str) else [str(choice) for choice in truth]
+        correct += int(predicted is not None and str(predicted) in allowed)
+    accuracy = float(correct / len(true_choices)) if true_choices else None
+    return {
+        "n": len(true_choices),
+        "sft_acc": accuracy,
+        "sft_top_group_acc": accuracy,
+        "sft_best_in_pred_top_acc": accuracy,
+        "sft_invalid_pred": int(invalid),
+        "sft_invalid_counted_as_wrong": True,
+        "target": "best_choice",
+    }
+
+
+def _listwise_best_choice_metadata(
+    records: Sequence[Mapping[str, Any]], *, eos: str
+) -> Tuple[
+    List[Optional[Dict[str, float]]],
+    List[Optional[List[str]]],
+    List[List[str]],
+    Dict[str, int],
+]:
+    """Build best-choice soft targets only when the top reward is tied."""
+    distributions: List[Optional[Dict[str, float]]] = []
+    candidates: List[Optional[List[str]]] = []
+    truth_groups: List[List[str]] = []
+    stats = {"rows": 0, "unique_winner": 0, "tied_winner": 0, "missing_scores": 0}
+    for record in records:
+        source_choice = _parse_best_choice(record.get("listwise_choice"))
+        if source_choice is None:
+            raise ValueError(f"record id={record.get('id')} has invalid listwise_choice")
+        scores = {
+            key: _score_value(record, f"listwise_score{key}")
+            for key in ("A", "B", "C")
+        }
+        if any(value is None for value in scores.values()):
+            distributions.append(None)
+            candidates.append(None)
+            truth_groups.append([source_choice])
+            stats["missing_scores"] += 1
+            continue
+        stats["rows"] += 1
+        maximum = max(float(value) for value in scores.values() if value is not None)
+        winners = [key for key in ("A", "B", "C") if float(scores[key]) == maximum]
+        response_ids = [f"Response{'ABC'.index(key) + 1}" for key in winners]
+        truth_groups.append(response_ids)
+        if len(response_ids) == 1:
+            distributions.append(None)
+            candidates.append(None)
+            stats["unique_winner"] += 1
+            continue
+        weight = 1.0 / float(len(response_ids))
+        distributions.append({str(index): weight for index in range(len(response_ids))})
+        candidates.append([f"Best: [{response_id}]{eos}" for response_id in response_ids])
+        stats["tied_winner"] += 1
+    return distributions, candidates, truth_groups, stats
+
+
+def _sample_training_items(
+    items: Sequence[Tuple[str, str, str, int]],
+    distributions: Sequence[Any],
+    candidates: Sequence[Any],
+    *,
+    samples: int,
+    seed: int,
+) -> Tuple[List[Tuple[str, str, str, int]], List[Any], List[Any]]:
+    if not (len(items) == len(distributions) == len(candidates)):
+        raise ValueError("training items and metadata must have equal length")
+    count = min(len(items), int(samples))
+    if count <= 0:
+        raise ValueError("training sample count must be positive")
+    indices = np.random.default_rng(int(seed)).permutation(len(items))[:count]
+    return (
+        [items[int(index)] for index in indices],
+        [distributions[int(index)] for index in indices],
+        [candidates[int(index)] for index in indices],
+    )
 
 
 def _parse_reward(text: str, *, minimum: float = 1.0, maximum: float = 5.0) -> Optional[float]:
@@ -530,63 +652,26 @@ def _evaluate_native_pairwise(
     }
 
 
-def _evaluate_native_listwise(
+def _evaluate_best_choice_listwise(
     *, model: Any, tokenizer: Any, records: Sequence[Mapping[str, Any]], max_length: int,
     batch_size: int, max_new_tokens: int,
 ) -> Dict[str, Any]:
-    valid_records, prompts, true_rankings = [], [], []
+    prompts: List[str] = []
+    valid_records: List[Mapping[str, Any]] = []
     for record in records:
-        scores = [_score_value(record, f"listwise_score{letter}") for letter in "ABC"]
-        if any(score is None for score in scores):
+        choice = _parse_best_choice(record.get("listwise_choice"))
+        if choice is None:
             continue
-        ranking = str(record.get("ranking", "")).strip() or _ranking_from_float_scores(
-            [float(score) for score in scores if score is not None]
-        )
         valid_records.append(record)
-        true_rankings.append(ranking)
-        prompts.append(
-            _unirm_prompt(
-                instruction=str(record.get("instruction", "")),
-                input_text=str(record.get("input", "")),
-                outputs=[str(record.get(f"output{letter}", "")) for letter in "ABC"],
-            )
-        )
+        prompts.append(_best_choice_prompt(record))
     texts = _generate_native(
         model=model, tokenizer=tokenizer, prompts=prompts, max_length=max_length,
         batch_size=batch_size, max_new_tokens=max_new_tokens,
     )
-    pred_rankings, invalid = [], 0
-    for text in texts:
-        scores, best = _unirm_scores_and_best(text, expected=3)
-        if all(score is not None for score in scores):
-            pred_rankings.append(_ranking_from_float_scores([float(score) for score in scores]))
-            continue
-        match = re.search(r"(\d+)", str(best or ""))
-        if match and 1 <= int(match.group(1)) <= 3:
-            top = "ABC"[int(match.group(1)) - 1]
-            rest = "=".join(letter for letter in "ABC" if letter != top)
-            pred_rankings.append(f"{top}>{rest}")
-            continue
-        invalid += 1
-        pred_rankings.append("A=B=C")
-    y_true = np.asarray([lw.RANKING_TO_LABEL[x] for x in true_rankings], dtype=np.int64)
-    y_pred = np.asarray([lw.RANKING_TO_LABEL[x] for x in pred_rankings], dtype=np.int64)
-    true_top = [lw._ranking_top_group(x) for x in true_rankings]
-    pred_top = [lw._ranking_top_group(x) for x in pred_rankings]
-    soft = lw._listwise_soft_metrics(true_rankings, pred_rankings)
-    return {
-        "n": len(true_rankings),
-        "sft_acc": float(np.mean(y_true == y_pred)) if true_rankings else None,
-        "sft_top_group_acc": float(np.mean([a == b for a, b in zip(true_top, pred_top)])) if true_rankings else None,
-        "sft_pairwise_relation_acc": soft.get("proxy_pairwise_relation_acc"),
-        "sft_best_in_pred_top_acc": soft.get("proxy_best_in_pred_top_acc"),
-        "sft_rank_mae": soft.get("proxy_rank_mae"),
-        "sft_rank_rmse": soft.get("proxy_rank_rmse"),
-        "sft_tie_rate": float(np.mean(["=" in x for x in pred_rankings])) if true_rankings else None,
-        "sft_invalid_pred": int(invalid),
-        "sft_confusion": base._confusion(y_true, y_pred, num_classes=len(lw.RANKING_LABELS)),
-        "ranking_labels": list(lw.RANKING_LABELS),
-    }
+    _, _, truth_groups, _ = _listwise_best_choice_metadata(
+        valid_records, eos=base.DEFAULT_EOS_TOKEN
+    )
+    return _best_choice_metrics(truth_groups, [_parse_best_choice(text) for text in texts])
 
 
 def _filter_raw_records(path: Path, ids: set[int]) -> List[Dict[str, Any]]:
@@ -732,7 +817,13 @@ def _pairwise_soft_choice_metadata(
     by_id = {int(row.get("id", -1)): row for row in raw_records}
     distributions: List[Optional[Dict[str, float]]] = []
     candidates: List[Optional[List[str]]] = []
-    stats = {"rows": 0, "unique_winner": 0, "tied_winner": 0, "missing_scores": 0}
+    stats = {
+        "rows": 0,
+        "unique_winner": 0,
+        "tied_winner": 0,
+        "explicit_tie": 0,
+        "missing_scores": 0,
+    }
     for row in rows:
         record = by_id.get(int(row.get("record_id", row.get("group_id", -1))))
         pair_name = str(row.get("pair_name", ""))
@@ -740,6 +831,14 @@ def _pairwise_soft_choice_metadata(
         pair = nested.get(pair_name, {}) if isinstance(nested, Mapping) else {}
         if not isinstance(pair, Mapping):
             pair = {}
+        explicit_tie = int(row.get("pairwise_label", -1)) == int(base.LABEL_TIE)
+        if not explicit_tie:
+            explicit_tie = str(pair.get("choice_code", "")).strip() == "3"
+        if explicit_tie:
+            distributions.append(None)
+            candidates.append(None)
+            stats["explicit_tie"] += 1
+            continue
         left, right = pair_name[:1], pair_name[1:2]
         left_score = _score_value(pair, f"score{left}")
         right_score = _score_value(pair, f"score{right}")
@@ -845,7 +944,7 @@ def _make_cfg(args: argparse.Namespace) -> three.RunConfig:
 
 def _selection_args(args: argparse.Namespace, out: Path) -> argparse.Namespace:
     return argparse.Namespace(
-        budget_units=600,
+        budget_units=int(args.budget_units),
         fixed_selected_questions="",
         seed=int(args.seed),
         selection_mode="proxy",
@@ -1023,7 +1122,10 @@ def parse_args() -> argparse.Namespace:
         "--target-format",
         choices=("converted", "native_json"),
         default="converted",
-        help="converted uses score/choice/ranking targets; native_json preserves UniRRM scores+best_id JSON.",
+        help=(
+            "converted uses canonical score/choice targets; native_json keeps the UniRRM pointwise target, "
+            "while pairwise/listwise targets use source choices and tie-aware best-choice outputs."
+        ),
     )
     parser.add_argument("--pointwise-train", type=Path, required=True)
     parser.add_argument("--pairwise-train", type=Path, required=True)
@@ -1034,7 +1136,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llama", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--budget-units", type=int, default=600)
     parser.add_argument("--pointwise-train-samples", type=int, default=200)
+    parser.add_argument("--pairwise-train-samples", type=int, default=200)
+    parser.add_argument("--listwise-train-samples", type=int, default=200)
     parser.add_argument("--pointwise-epochs", type=int, default=None)
     parser.add_argument("--pairwise-epochs", type=int, default=None)
     parser.add_argument("--listwise-epochs", type=int, default=None)
@@ -1084,6 +1189,11 @@ def main() -> None:
         args.pairwise_order_augmentation or args.listwise_order_augmentation
     ):
         raise ValueError("native_json is the no-conversion control and cannot use order augmentation")
+    for name in ("pointwise_train_samples", "pairwise_train_samples", "listwise_train_samples"):
+        if int(getattr(args, name)) <= 0:
+            raise ValueError(f"{name.replace('_', '-')} must be positive")
+    if int(args.budget_units) <= 0:
+        raise ValueError("budget-units must be positive")
     args.out.mkdir(parents=True, exist_ok=False)
     _write_json(args.out / "config.json", {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()})
 
@@ -1100,17 +1210,20 @@ def main() -> None:
     if args.target_format == "native_json":
         point_items = _native_pointwise_items(point_answers, decimals=int(args.reward_decimals))
         pair_items = _native_pairwise_items(pair_raw_records, decimals=int(args.reward_decimals))
-        list_items = _native_listwise_items(list_raw_records, decimals=int(args.reward_decimals))
+        list_items = _best_choice_listwise_items(list_raw_records)
         pair_train, pair_train_rows, pair_train_stats = _load_pairwise(pair_train_path)
         list_train, list_train_rows, list_train_stats = _load_listwise(list_train_path)
-        pair_dist = [None] * len(pair_items)
-        pair_candidates = [None] * len(pair_items)
-        list_dist = [None] * len(list_items)
-        list_candidates = [None] * len(list_items)
-        pair_tie_stats = {"native_json": True}
-        list_tie_stats = {"native_json": True}
-        pair_policy_stats = {"policy": "native_json", "input": len(pair_items), "kept": len(pair_items)}
-        list_policy_stats = {"policy": "native_json", "input": len(list_items), "kept": len(list_items)}
+        pair_dist, pair_candidates, pair_tie_stats = _pairwise_soft_choice_metadata(
+            pair_train_rows, pair_raw_records, eos=base.DEFAULT_EOS_TOKEN
+        )
+        pair_items, pair_dist, pair_candidates, pair_policy_stats = _apply_tie_policy(
+            pair_items, pair_dist, pair_candidates, policy=str(args.tie_policy)
+        )
+        list_dist, list_candidates, _, list_tie_stats = _listwise_best_choice_metadata(
+            list_raw_records, eos=base.DEFAULT_EOS_TOKEN
+        )
+        pair_policy_stats = {**pair_policy_stats, "format": "choice_only"}
+        list_policy_stats = {"policy": "best_choice_soft_ties", "input": len(list_items), "kept": len(list_items)}
     else:
         pair_train, pair_train_rows, pair_train_stats = _load_pairwise(pair_train_path)
         list_raw_for_training = list_raw_records
@@ -1140,18 +1253,44 @@ def main() -> None:
         else:
             pair_dist, pair_candidates = pair_raw_dist, pair_raw_candidates
             pair_augmentation_stats = {"enabled": False, "input_examples": len(pair_items_raw), "output_examples": len(pair_items_raw)}
-        list_dist, list_candidates, list_tie_stats = _listwise_soft_choice_metadata(
-            list_train_rows, eos=base.DEFAULT_EOS_TOKEN
-        )
         pair_items, pair_dist, pair_candidates, pair_policy_stats = _apply_tie_policy(
             pair_items_raw, pair_dist, pair_candidates, policy=str(args.tie_policy)
         )
-        list_items_raw = three._listwise_items(list_train)
-        list_items, list_dist, list_candidates, list_policy_stats = _apply_tie_policy(
-            list_items_raw, list_dist, list_candidates, policy=str(args.tie_policy)
+        list_items = _best_choice_listwise_items(list_raw_for_training)
+        list_dist, list_candidates, _, list_tie_stats = _listwise_best_choice_metadata(
+            list_raw_for_training, eos=base.DEFAULT_EOS_TOKEN
         )
+        list_policy_stats = {
+            "policy": "best_choice_soft_ties",
+            "input": len(list_items),
+            "kept": len(list_items),
+        }
         pair_train_stats = {**pair_train_stats, "generated_pairs_after_augmentation": len(pair_items_raw)}
         list_train_stats = {**list_train_stats, **list_augmentation_stats}
+
+    if args.mode == "mix":
+        pair_items, pair_dist, pair_candidates = _sample_training_items(
+            pair_items,
+            pair_dist,
+            pair_candidates,
+            samples=int(args.pairwise_train_samples),
+            seed=int(args.seed) + 202,
+        )
+        list_items, list_dist, list_candidates = _sample_training_items(
+            list_items,
+            list_dist,
+            list_candidates,
+            samples=int(args.listwise_train_samples),
+            seed=int(args.seed) + 303,
+        )
+        pair_policy_stats = {
+            **pair_policy_stats,
+            "final_train_samples": len(pair_items),
+        }
+        list_policy_stats = {
+            **list_policy_stats,
+            "final_train_samples": len(list_items),
+        }
 
     point_eval_questions = load_skywork_json(str(args.pointwise_eval), dataset_name="reward-model")
     point_eval = _single_answer_eval(point_eval_questions, seed=int(args.seed) + 65)
@@ -1201,13 +1340,9 @@ def main() -> None:
             model=model, tokenizer=tokenizer, answers=point_eval, max_length=int(args.max_length),
             batch_size=int(args.eval_batch_size), max_new_tokens=int(args.max_new_tokens_native),
         )
-        pair_metrics = _evaluate_native_pairwise(
-            model=model, tokenizer=tokenizer, records=eval_pair_records, max_length=int(args.max_length),
-            batch_size=int(args.eval_batch_size), max_new_tokens=int(args.max_new_tokens_native),
-        )
-        list_metrics = _evaluate_native_listwise(
-            model=model, tokenizer=tokenizer, records=eval_list_records, max_length=int(args.max_length),
-            batch_size=int(args.eval_batch_size), max_new_tokens=int(args.max_new_tokens_native),
+        pair_metrics = base._evaluate_pairwise_sft(
+            model=model, tokenizer=tokenizer, examples=pair_eval, max_length=int(args.max_length),
+            batch_size=int(args.eval_batch_size), max_new_tokens=int(args.max_new_tokens_pairwise),
         )
     else:
         point_metrics = _evaluate_pointwise(
@@ -1218,10 +1353,18 @@ def main() -> None:
             model=model, tokenizer=tokenizer, examples=pair_eval, max_length=int(args.max_length),
             batch_size=int(args.eval_batch_size), max_new_tokens=int(args.max_new_tokens_pairwise),
         )
-        list_metrics = three._evaluate_listwise_sft(
-            model=model, tokenizer=tokenizer, examples=list_eval, max_length=int(args.max_length),
-            batch_size=int(args.eval_batch_size), max_new_tokens=int(args.max_new_tokens_listwise),
-        )
+    list_metrics = _evaluate_best_choice_listwise(
+        model=model,
+        tokenizer=tokenizer,
+        records=eval_list_records,
+        max_length=int(args.max_length),
+        batch_size=int(args.eval_batch_size),
+        max_new_tokens=(
+            int(args.max_new_tokens_native)
+            if args.target_format == "native_json"
+            else int(args.max_new_tokens_listwise)
+        ),
+    )
     compact = {
         "mode": str(args.mode),
         "pointwise_mae": point_metrics.get("mae"),
@@ -1247,6 +1390,7 @@ def main() -> None:
             "target_decimals": int(args.reward_decimals), "train_answers": len(point_answers),
         },
         "target_format": str(args.target_format),
+        "listwise_target": "source_best_choice_with_soft_top_ties",
         "order_augmentation": {
             "pairwise": bool(args.pairwise_order_augmentation),
             "listwise": bool(args.listwise_order_augmentation),

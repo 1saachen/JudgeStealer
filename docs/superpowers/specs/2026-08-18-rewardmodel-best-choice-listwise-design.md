@@ -12,20 +12,22 @@ best-choice accuracy as `List Acc`.
   10 epochs per stage.
 - Ours uses selector budget 600 answer units, which corresponds to 200 aligned
   reward-model questions with three answers each.
-- Pointwise keeps continuous reward targets. Pairwise keeps the existing
-  choice/tie targets.
-- Listwise uses the source record's `listwise_choice` directly. It does not
-  derive a ranking from pointwise scores or listwise scores.
-- Listwise evaluation compares the predicted best response with the source
-  best response. Full ranking accuracy is not the table's primary metric.
+- Pointwise keeps continuous reward targets. Pairwise keeps source `choice`
+  targets; equal-score non-explicit ties may use a uniform soft target, while
+  explicit `choice=C` remains a hard tie.
+- Listwise emits only the source best-choice format. Equal top listwise scores
+  use a uniform soft target over tied best responses; no ranking or numeric
+  score is emitted.
+- Listwise evaluation accepts any member of an equal-score top group. Full
+  ranking accuracy is not the table's primary metric.
 - Raw listwise scores remain available in input data and summaries for
   diagnostics, but are not emitted as listwise SFT targets.
 
 ## Scope
 
-The change is limited to `run_rewardmodel_three_stage_sft.py` and focused
-tests. Existing selector acquisition, pointwise reward regression, pairwise
-training, and evaluation data preparation remain unchanged.
+The change covers `run_rewardmodel_three_stage_sft.py`, focused tests, and the
+reward-model LoRA launcher/documentation. Existing selector acquisition,
+pointwise reward regression, and evaluation data preparation remain unchanged.
 
 ## Validation
 
