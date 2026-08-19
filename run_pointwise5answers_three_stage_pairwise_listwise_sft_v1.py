@@ -91,6 +91,7 @@ class RunConfig:
     candidate_selector_proxy_update_epochs: int
     candidate_selector_proxy_mode: str
     candidate_selector_finetune_mode: str
+    candidate_selector_load_in_4bit: bool
     reuse_selection_proxy_for_stage1: bool
     candidate_bert_selector_model: str
     candidate_bert_selector_max_length: int
@@ -2011,6 +2012,11 @@ def parse_args() -> argparse.Namespace:
         help="Train the active-selection proxy with LoRA adapters or all model parameters.",
     )
     parser.add_argument(
+        "--candidate-selector-load-in-4bit",
+        action="store_true",
+        help="Load only the active-selection proxy in 4-bit; the main SFT model remains unquantized.",
+    )
+    parser.add_argument(
         "--reuse-selection-proxy-for-stage1",
         action="store_true",
         help=(
@@ -2226,6 +2232,7 @@ def main() -> None:
         candidate_selector_proxy_update_epochs=int(args.candidate_selector_proxy_update_epochs),
         candidate_selector_proxy_mode=str(args.candidate_selector_proxy_mode),
         candidate_selector_finetune_mode=str(args.candidate_selector_finetune_mode),
+        candidate_selector_load_in_4bit=bool(args.candidate_selector_load_in_4bit),
         reuse_selection_proxy_for_stage1=bool(args.reuse_selection_proxy_for_stage1),
         candidate_bert_selector_model=str(args.candidate_bert_selector_model),
         candidate_bert_selector_max_length=int(args.candidate_bert_selector_max_length),
@@ -2369,6 +2376,10 @@ def main() -> None:
     if str(cfg.candidate_selector_finetune_mode) == "full" and bool(cfg.load_in_4bit):
         raise ValueError(
             "--candidate-selector-finetune-mode full cannot be combined with --load-in-4bit"
+        )
+    if bool(cfg.candidate_selector_load_in_4bit) and str(cfg.candidate_selector_finetune_mode) != "lora":
+        raise ValueError(
+            "--candidate-selector-load-in-4bit requires --candidate-selector-finetune-mode lora"
         )
     if bool(cfg.reuse_selection_proxy_for_stage1):
         if str(cfg.train_selection_mode) != "candidate_triple_selector":

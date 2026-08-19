@@ -283,6 +283,7 @@ def _make_cfg(args: argparse.Namespace) -> three.RunConfig:
         candidate_selector_proxy_update_epochs=1,
         candidate_selector_proxy_mode="classifier_heads",
         candidate_selector_finetune_mode="lora",
+        candidate_selector_load_in_4bit=False,
         reuse_selection_proxy_for_stage1=False,
         candidate_bert_selector_model="bert-base-uncased",
         candidate_bert_selector_max_length=512,

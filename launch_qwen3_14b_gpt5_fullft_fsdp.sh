@@ -144,7 +144,8 @@ run_job() {
       --pointwise-global-smooth-gaussian-sigma 1.0 --pointwise-global-smooth-stages all \
       --train-selection-mode candidate_triple_selector \
       --candidate-selector-kind bias_trap_pointwise --candidate-selector-target-task pointwise \
-      --candidate-selector-proxy-mode lm_head --candidate-selector-finetune-mode full \
+      --candidate-selector-proxy-mode lm_head --candidate-selector-finetune-mode lora \
+      --candidate-selector-load-in-4bit \
       --candidate-selector-init-triples 80 \
       --candidate-selector-batch-size 20 --candidate-selector-max-score-candidates 100 \
       --candidate-selector-one-per-question --candidate-selector-proxy-warmup-epochs 3 \

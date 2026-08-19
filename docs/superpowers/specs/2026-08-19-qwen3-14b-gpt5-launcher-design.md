@@ -49,12 +49,14 @@
 新建两卡 FSDP 启动器。它接受两个 GPU 编号，在两张卡都空闲时，用 `torchrun`
 以两个进程启动单个任务；两个数据集依序完成。FSDP 使用 `full_shard auto_wrap`、
 `Qwen3DecoderLayer`、activation checkpointing 和 `FULL_STATE_DICT`，只保存最后
-阶段。它不传递 LoRA 或 4-bit 参数，selector proxy 也使用 full fine-tuning，学习率
-和 proxy 学习率均为 `1e-5`。
+阶段。主模型不传递 LoRA 或 4-bit 参数；由于 selector proxy 在 FSDP 主训练前初始化，
+selector proxy 单独使用 LoRA + 4-bit（通过 `--candidate-selector-load-in-4bit`），
+主模型学习率和 proxy 学习率均为 `1e-5`。
 
 FSDP 仅改变分布式内存布局，仍然是完整参数训练。由于两张卡组成一个任务，Full-FT
 启动器不会在同一 GPU 集合上并行第二项实验。该入口会重新完成候选选样，但 Stage 1
-从原始 checkpoint 开始，不加载单进程 selector proxy。
+从原始 checkpoint 开始，不加载单进程 selector proxy。结果应标注为“Full-FT
+surrogate，LoRA + 4-bit candidate selector”。
 
 ## 验证与使用
 

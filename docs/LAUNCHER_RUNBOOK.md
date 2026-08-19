@@ -236,9 +236,12 @@ Claude 的八项 LoRA + 4-bit 实验使用：
 ## 11. Qwen3-14B GPT-5 补跑
 
 14B 的 GPT-5 补跑分成两个启动器：LoRA 队列使用单卡，Full-FT 使用两张卡的
-FSDP。两者都使用模型目录 `models/Qwen3-14B`，并将结果写到 NVMe。LoRA 会复用
-Stage-1 selection proxy；Full-FT FSDP 会重新选样但从原始 checkpoint 开始，因为
-当前训练入口不允许 FSDP 复用单进程 proxy。
+FSDP。两者都使用模型目录 `models/Qwen3-14B`，并将结果写到 NVMe。Full-FT 的
+主模型 Stage 1/2/3/4 仍然是未量化的全参数训练；由于选样 proxy 在 FSDP 主训练
+之前初始化，14B Full-FT 启动器单独使用 `candidate-selector-finetune-mode lora`
+和 `candidate-selector-load-in-4bit`，避免每个 rank 各自加载一份完整 proxy 导致
+Adam 状态 OOM。这个设置应在结果表或实验记录中标注为“Full-FT surrogate，LoRA
++ 4-bit candidate selector”。
 
 LoRA 允许多个任务在不同空闲 GPU 上并行：
 

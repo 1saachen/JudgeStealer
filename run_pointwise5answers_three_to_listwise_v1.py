@@ -1986,7 +1986,7 @@ def _select_candidate_triples_with_selector(
             max_length=int(cfg.proxy_max_length),
             finetune_mode=_resolve_candidate_selector_finetune_mode(cfg),
             gradient_checkpointing=True,
-            load_in_4bit=bool(cfg.load_in_4bit),
+            load_in_4bit=bool(getattr(cfg, "candidate_selector_load_in_4bit", cfg.load_in_4bit)),
             score_min=int(cfg.score_min),
             score_max=int(cfg.score_max),
             fix_score_prefix_in_prompt=bool(cfg.fix_score_prefix_in_prompt),
