@@ -6,10 +6,13 @@ import numpy as np
 from run_rewardmodel_three_stage_sft import (
     _apply_tie_policy,
     _best_choice_listwise_items,
+    _best_choice_prompt,
+    _best_choice_target,
     _best_choice_metrics,
     _listwise_best_choice_metadata,
     _native_pairwise_items,
     _parse_best_choice,
+    _pointwise_prompt,
     _listwise_soft_choice_metadata,
     _pairwise_soft_choice_metadata,
     _sample_training_items,
@@ -140,9 +143,50 @@ def test_listwise_target_uses_source_best_choice_only():
 
     assert len(items) == 1
     target = items[0][2]
-    assert target.startswith("Best: [Response3]")
+    assert target.startswith("3")
+    assert "Best:" not in target
+    assert "Response" not in target
     assert "5.0" not in target
     assert "Ranking" not in target
+
+
+def test_converted_prompts_keep_unirrm_evaluation_protocol():
+    answer = _answer(7, "A")
+    answer = SkyworkAnswer(
+        question_id=7,
+        source_id=7,
+        dataset="test",
+        instruction="Explain recursion.",
+        input_text="",
+        answer_key="A",
+        model="model",
+        output="A recursive answer.",
+        reward=4.5,
+    )
+    point_prompt = _pointwise_prompt(answer)
+    list_prompt = _best_choice_prompt(
+        {
+            "instruction": "Choose the best answer.",
+            "input": "",
+            "outputA": "answer A",
+            "outputB": "answer B",
+            "outputC": "answer C",
+        }
+    )
+    assert "### Phase 1: Deep Analysis" in point_prompt
+    assert "### Phase 2: Dynamic Rubric Generation" in point_prompt
+    assert "<User_Input>" in point_prompt
+    assert "<Response1>" in point_prompt
+    assert point_prompt.endswith("Score: [")
+    assert "### Phase 1: Deep Analysis" in list_prompt
+    assert "Return only one integer: 1, 2, or 3." in list_prompt
+    assert "Best: [Response" not in list_prompt
+
+
+def test_listwise_target_and_parser_use_bare_response_numbers():
+    assert _best_choice_target("B") == "2</s>"
+    assert _parse_best_choice("2</s>") == "Response2"
+    assert _parse_best_choice(" 3<|im_end|>") == "Response3"
 
 
 def test_listwise_equal_top_scores_use_soft_best_choice_targets():
@@ -166,7 +210,7 @@ def test_listwise_equal_top_scores_use_soft_best_choice_targets():
     )
 
     assert distributions == [{"0": 0.5, "1": 0.5}]
-    assert candidates == [["Best: [Response1]</s>", "Best: [Response2]</s>"]]
+    assert candidates == [["1</s>", "2</s>"]]
     assert truth_groups == [["Response1", "Response2"]]
     assert stats["tied_winner"] == 1
 

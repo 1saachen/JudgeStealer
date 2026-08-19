@@ -49,10 +49,14 @@ Ours 在 1500 条 question 训练池中使用 proxy selector，预算为 600 个
 answer units，即 200 个三回答问题；selector 使用 `80 / 20 / 100` 的
 初始化、批次和候选池配置，三阶段各训练 1 个 epoch，并使用 LoRA + 4-bit。
 
+Converted 分支保留 UniRRM 的三阶段评价协议和 `<User_Input>` /
+`<ResponseN>` 输入结构，只把最终输出转换成任务标签：pointwise 输出
+`Score: [X]`，pairwise 输出 `[[1]]` / `[[2]]` / `[[3]]`，listwise 只输出裸
+数字 `1` / `2` / `3`。不输出 JSON、ranking、`Best:` 或 `ResponseN` 文本。
 Pointwise 保留连续分数。Pairwise 的唯一胜者遵从原始 `choice`；分数相同
 时，两个候选赢家使用均匀软目标；数据明确标记的 `choice=C` 保持为平局。
-Listwise 只输出 `Best: [ResponseN]`，不输出 ranking 或分数；最高分并列
-时，在并列最佳之间使用均匀软目标。验证时，预测任一并列最佳都计为正确。
+Listwise 最高分并列时，在并列最佳之间使用均匀软目标。验证时，预测任一
+并列最佳都计为正确。
 
 ## 启动
 

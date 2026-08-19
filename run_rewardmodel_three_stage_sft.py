@@ -46,12 +46,6 @@ Evaluate helpfulness, relevance, accuracy, depth, creativity, and level of detai
 Give ONLY one numeric reward from 1 to 5. Decimal values are allowed.
 Use this exact format: Score: [X]"""
 
-BEST_CHOICE_SYSTEM_PROMPT = """You are an impartial judge evaluating three AI assistant responses.
-
-Choose the single best response. Return only the response ID using this exact
-format: Best: [Response1], Best: [Response2], or Best: [Response3]."""
-
-
 UNIRRM_SYSTEM_PROMPT = """You are a multilingual evaluation expert, responsible for conducting rigorous, objective, and multi-dimensional evaluations of responses generated for User Input.
 
 Your evaluation must strictly follow the step-by-step process outlined below:
@@ -84,6 +78,34 @@ For each rubric, evaluate the response:
 }
 
 Return only valid JSON."""
+
+
+def _converted_unirrm_system_prompt(output_instruction: str) -> str:
+    """Keep UniRRM's evaluation protocol while changing only the label format."""
+    protocol = UNIRRM_SYSTEM_PROMPT.split("### OUTPUT FORMAT", 1)[0].rstrip()
+    return f"{protocol}\n\n### OUTPUT FORMAT\n{str(output_instruction).strip()}"
+
+
+CONVERTED_POINTWISE_SYSTEM_PROMPT = _converted_unirrm_system_prompt(
+    """Evaluate the single response using the procedure above.
+Return only one numeric reward in this exact format: Score: [X]
+X must be a number from 1 to 5. Decimal values are allowed.
+Do not output JSON, explanations, rubrics, or analysis."""
+)
+
+CONVERTED_PAIRWISE_SYSTEM_PROMPT = _converted_unirrm_system_prompt(
+    """Evaluate the two responses using the procedure above.
+Return only one label: [[1]], [[2]], or [[3]].
+[[1]] means Response1 is better, [[2]] means Response2 is better, and [[3]] means tie.
+Do not output JSON, explanations, rubrics, or analysis."""
+)
+
+CONVERTED_LISTWISE_SYSTEM_PROMPT = _converted_unirrm_system_prompt(
+    """Evaluate the three responses using the procedure above.
+Return only one integer: 1, 2, or 3.
+The integer identifies the best response in its displayed order.
+Do not output JSON, explanations, rubrics, response names, or analysis."""
+)
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -135,21 +157,34 @@ def _unirm_prompt(
     )
 
 
+def _converted_unirrm_prompt(
+    *,
+    system_prompt: str,
+    instruction: str,
+    input_text: str,
+    outputs: Sequence[str],
+    assistant_suffix: str = "",
+) -> str:
+    parts = [
+        "### System",
+        str(system_prompt).strip(),
+        "",
+        "### User",
+        _unirm_user_prompt(instruction, input_text, outputs),
+        "",
+        "### Assistant",
+    ]
+    if assistant_suffix:
+        parts.append(str(assistant_suffix))
+    return "\n".join(parts)
+
+
 def _best_choice_prompt(record: Mapping[str, Any]) -> str:
-    return "\n".join(
-        [
-            "### System",
-            BEST_CHOICE_SYSTEM_PROMPT,
-            "",
-            "### User",
-            _unirm_user_prompt(
-                str(record.get("instruction", "")),
-                str(record.get("input", "")),
-                [str(record.get(f"output{letter}", "")) for letter in "ABC"],
-            ),
-            "",
-            "### Assistant",
-        ]
+    return _converted_unirrm_prompt(
+        system_prompt=CONVERTED_LISTWISE_SYSTEM_PROMPT,
+        instruction=str(record.get("instruction", "")),
+        input_text=str(record.get("input", "")),
+        outputs=[str(record.get(f"output{letter}", "")) for letter in "ABC"],
     )
 
 
@@ -185,6 +220,9 @@ def _best_response_id(choice: Any, labels: Sequence[str]) -> str:
 
 def _parse_best_choice(value: Any) -> Optional[str]:
     text = str(value or "").strip()
+    bare_match = re.match(r"^([123])(?=\s|$|<|\])", text)
+    if bare_match:
+        return f"Response{bare_match.group(1)}"
     if text.upper() in {"A", "B", "C"}:
         return f"Response{'ABC'.index(text.upper()) + 1}"
     response_match = re.search(r"\bResponse\s*([123])\b", text, re.IGNORECASE)
@@ -204,7 +242,7 @@ def _best_choice_target(choice: Any) -> Optional[str]:
     response_id = _parse_best_choice(choice)
     if response_id is None:
         return None
-    return f"Best: [{response_id}]{base.DEFAULT_EOS_TOKEN}"
+    return f"{response_id[-1]}{base.DEFAULT_EOS_TOKEN}"
 
 
 def _extract_unirm_json(text: str) -> Optional[Mapping[str, Any]]:
@@ -248,13 +286,12 @@ def _unirm_scores_and_best(
 
 
 def _pointwise_prompt(answer: SkyworkAnswer) -> str:
-    return base.build_judge_prompt(
-        system_prompt=CONTINUOUS_JUDGE_PROMPT,
+    return _converted_unirrm_prompt(
+        system_prompt=CONVERTED_POINTWISE_SYSTEM_PROMPT,
         instruction=str(answer.instruction),
         input_text=str(answer.input_text),
-        candidate_output=str(answer.output),
-        include_gold_score=False,
-        fix_score_prefix=True,
+        outputs=[str(answer.output)],
+        assistant_suffix="Score: [",
     )
 
 
@@ -407,7 +444,7 @@ def _listwise_best_choice_metadata(
             continue
         weight = 1.0 / float(len(response_ids))
         distributions.append({str(index): weight for index in range(len(response_ids))})
-        candidates.append([f"Best: [{response_id}]{eos}" for response_id in response_ids])
+        candidates.append([f"{response_id[-1]}{eos}" for response_id in response_ids])
         stats["tied_winner"] += 1
     return distributions, candidates, truth_groups, stats
 
@@ -681,9 +718,11 @@ def _filter_raw_records(path: Path, ids: set[int]) -> List[Dict[str, Any]]:
     return [dict(row) for row in raw if isinstance(row, dict) and int(row.get("id", -1)) in ids]
 
 
-def _load_pairwise(path: Path) -> Tuple[List[Any], List[Dict[str, Any]], Dict[str, Any]]:
+def _load_pairwise(
+    path: Path, *, system_prompt: str = base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
+) -> Tuple[List[Any], List[Dict[str, Any]], Dict[str, Any]]:
     return base._load_pairwise_abc_eval_dataset(
-        str(path), pairwise_system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
+        str(path), pairwise_system_prompt=str(system_prompt)
     )
 
 
@@ -1207,11 +1246,18 @@ def main() -> None:
     reward_mean = float(np.mean([answer.reward for answer in point_answers]))
     pair_raw_records = json.loads(pair_train_path.read_text(encoding="utf-8"))
     list_raw_records = json.loads(list_train_path.read_text(encoding="utf-8"))
+    pairwise_system_prompt = (
+        CONVERTED_PAIRWISE_SYSTEM_PROMPT
+        if args.target_format == "converted"
+        else base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
+    )
     if args.target_format == "native_json":
         point_items = _native_pointwise_items(point_answers, decimals=int(args.reward_decimals))
         pair_items = _native_pairwise_items(pair_raw_records, decimals=int(args.reward_decimals))
         list_items = _best_choice_listwise_items(list_raw_records)
-        pair_train, pair_train_rows, pair_train_stats = _load_pairwise(pair_train_path)
+        pair_train, pair_train_rows, pair_train_stats = _load_pairwise(
+            pair_train_path, system_prompt=pairwise_system_prompt
+        )
         list_train, list_train_rows, list_train_stats = _load_listwise(list_train_path)
         pair_dist, pair_candidates, pair_tie_stats = _pairwise_soft_choice_metadata(
             pair_train_rows, pair_raw_records, eos=base.DEFAULT_EOS_TOKEN
@@ -1231,7 +1277,9 @@ def main() -> None:
             reward_mean=reward_mean,
             decimals=int(args.reward_decimals),
         )
-        pair_train, pair_train_rows, pair_train_stats = _load_pairwise(pair_train_path)
+        pair_train, pair_train_rows, pair_train_stats = _load_pairwise(
+            pair_train_path, system_prompt=pairwise_system_prompt
+        )
         list_raw_for_training = list_raw_records
         list_augmentation_stats = {"enabled": False, "input_records": len(list_raw_records), "output_records": len(list_raw_records)}
         if args.listwise_order_augmentation:
@@ -1300,7 +1348,9 @@ def main() -> None:
 
     point_eval_questions = load_skywork_json(str(args.pointwise_eval), dataset_name="reward-model")
     point_eval = _single_answer_eval(point_eval_questions, seed=int(args.seed) + 65)
-    pair_eval, pair_eval_rows, pair_eval_stats = _load_pairwise(args.pairwise_eval)
+    pair_eval, pair_eval_rows, pair_eval_stats = _load_pairwise(
+        args.pairwise_eval, system_prompt=pairwise_system_prompt
+    )
     list_eval, list_eval_rows, list_eval_stats = _load_listwise(args.listwise_eval)
     eval_pair_records = json.loads(args.pairwise_eval.read_text(encoding="utf-8"))
     eval_list_records = json.loads(args.listwise_eval.read_text(encoding="utf-8"))
