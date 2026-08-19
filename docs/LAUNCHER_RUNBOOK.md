@@ -260,6 +260,11 @@ tail -f /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs/qwen3_14b_gpt5_lora_
 Full-FT 必须提供四张不同且都空闲的 GPU。脚本会等待四张卡同时空闲，然后依次运行
 Alpaca 和 GPT4All，避免同一 GPU 对被两个 FSDP 作业复用：
 
+FSDP Full-FT 会在 Stage 1、Stage 2、Stage 3 和最终 Stage 4 都保存阶段 checkpoint，
+并在进入下一阶段前重新加载上一个 checkpoint。这是为了避免 Accelerate/FSDP2 把
+上一阶段的 FSDP wrapper 当成下一阶段的原始模型；因此单项实验会比只保存最终模型
+多占一些 NVMe 空间。
+
 ```bash
 ./launch_qwen3_14b_gpt5_fullft_fsdp.sh 2 3 4 5
 ```
