@@ -145,7 +145,7 @@ run_job() {
       --train-selection-mode candidate_triple_selector \
       --candidate-selector-kind bias_trap_pointwise --candidate-selector-target-task pointwise \
       --candidate-selector-proxy-mode lm_head --candidate-selector-finetune-mode full \
-      --reuse-selection-proxy-for-stage1 --candidate-selector-init-triples 80 \
+      --candidate-selector-init-triples 80 \
       --candidate-selector-batch-size 20 --candidate-selector-max-score-candidates 100 \
       --candidate-selector-one-per-question --candidate-selector-proxy-warmup-epochs 3 \
       --candidate-selector-proxy-update-epochs 1 --candidate-selector-exploration-ratio 0 \

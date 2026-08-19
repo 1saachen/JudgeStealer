@@ -61,6 +61,7 @@ def test_fullft_launcher_uses_two_process_fsdp_without_lora_or_4bit():
         assert argument in text
     assert "--use-lora" not in text
     assert "--load-in-4bit" not in text
+    assert "--reuse-selection-proxy-for-stage1" not in text
     assert "GPU_IDS" in text
 
 

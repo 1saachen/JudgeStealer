@@ -25,8 +25,10 @@
 - Stage 1/2/3 各训练 1 epoch，Stage 4 使用全部分层 triple replay 训练 1 epoch；
 - `max_length=4096`，训练 batch size 1，梯度累积 16，只做最终评测；
 - local-Gaussian smoothing：alpha 0.1、sigma 1.0，覆盖全部阶段；
-- selector 维持 candidate triple selector、LM head proxy、Stage-1 复用 proxy、
-  init 80、每轮 20、候选池 100，以及当前表格使用的零探索与 bias/diversity 设置；
+- selector 维持 candidate triple selector、LM head proxy、init 80、每轮 20、候选池
+  100，以及当前表格使用的零探索与 bias/diversity 设置。LoRA 复用 Stage-1 proxy；
+  FSDP Full-FT 不复用该 proxy，因为当前训练入口明确禁止 FSDP 与
+  `--reuse-selection-proxy-for-stage1` 组合，Stage 1 从原始 Qwen checkpoint 开始。
 - Alpaca 使用 `data/alpaca/gpt5/train-20k.json` 和
   `data/alpaca/gpt5/val-2k-eval-listwise.json`；GPT4All 使用
   `data/gpt4all/gpt5/train9k_pointwise_pairwise_no_val_overlap.json` 和
@@ -51,7 +53,8 @@
 和 proxy 学习率均为 `1e-5`。
 
 FSDP 仅改变分布式内存布局，仍然是完整参数训练。由于两张卡组成一个任务，Full-FT
-启动器不会在同一 GPU 集合上并行第二项实验。
+启动器不会在同一 GPU 集合上并行第二项实验。该入口会重新完成候选选样，但 Stage 1
+从原始 checkpoint 开始，不加载单进程 selector proxy。
 
 ## 验证与使用
 
