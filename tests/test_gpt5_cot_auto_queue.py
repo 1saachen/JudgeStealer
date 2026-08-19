@@ -22,3 +22,13 @@ def test_launcher_uses_configurable_cot_roots_and_unique_outputs():
     assert "GPT4ALL_COT_DATA_DIR" in text
     assert 'name="${surrogate}_${dataset}_gpt5_cot_${paper_method}_seed42"' in text
     assert '"$PY" "$ROOT/prepare_alpaca_cot_4066.py"' in text
+
+
+def test_launcher_treats_all_positionals_as_allowed_gpus():
+    text = LAUNCHER.read_text(encoding="utf-8")
+
+    assert 'usage: $0 <gpu_id> [gpu_id ...]' in text
+    assert 'ALLOWED_GPUS=("$@")' in text
+    assert 'JOBS=("${ALL_JOBS[@]}")' in text
+    assert 'GPU_WORKER_PIDS' in text
+    assert 'SKIP_JOBS="${SKIP_JOBS:-}"' in text
