@@ -193,6 +193,35 @@ def _fsdp_enabled(cfg: RunConfig) -> bool:
     return bool(str(cfg.fsdp).strip())
 
 
+def _reload_fsdp_stage_model(
+    model: Any,
+    tokenizer: Any,
+    checkpoint_dir: Path,
+    cfg: RunConfig,
+) -> Tuple[Any, Any]:
+    """Reload a completed FSDP stage before constructing the next Trainer.
+
+    Accelerate/FSDP2 cannot auto-wrap a model that still contains the previous
+    stage's FSDP wrappers. Loading the completed full-state checkpoint gives the
+    next stage a plain causal LM while preserving the trained weights.
+    """
+    if not _fsdp_enabled(cfg):
+        return model, tokenizer
+    _distributed_barrier()
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    reloaded_model, reloaded_tokenizer, _ = base._load_sft_model_and_tokenizer(
+        model_name_or_path=str(checkpoint_dir),
+        max_length=int(cfg.max_length),
+        load_in_4bit=False,
+    )
+    reloaded_tokenizer.model_max_length = int(cfg.max_length)
+    reloaded_tokenizer.padding_side = "left"
+    return reloaded_model, reloaded_tokenizer
+
+
 def _is_final_training_stage(cfg: RunConfig, stage_name: str) -> bool:
     if str(cfg.stage4_replay_strategy) != "none":
         return str(stage_name) == "stage4_consolidation"
@@ -1148,6 +1177,10 @@ def _train_sft_on_items(
         or str(cfg.eval_stages) == "all"
         or _is_final_training_stage(cfg, stage_name)
     )
+    # Every FSDP stage must be materialized so the next Trainer can reload a
+    # plain model instead of receiving the previous stage's FSDP wrappers.
+    if fsdp_enabled:
+        save_stage_model = True
     if save_stage_model:
         # Trainer.save_model() performs the FSDP full-state-dict gather
         # collectively. Every rank must execute it; only rank zero writes.
@@ -2827,6 +2860,13 @@ def main() -> None:
         )
     _write_json(out / "train_stats_stage1_pointwise_sft.json", train_stats["stage1_pointwise"])
     maybe_eval_all("after_stage1")
+    if _fsdp_enabled(cfg):
+        model, tokenizer = _reload_fsdp_stage_model(
+            model,
+            tokenizer,
+            stage1_dir,
+            cfg,
+        )
 
     stage1_teacher_logits: Optional[List[Optional[List[float]]]] = None
     if float(cfg.pointwise_teacher_distill_weight) > 0.0 and (
@@ -2871,6 +2911,13 @@ def main() -> None:
         )
         _write_json(out / "train_stats_stage23_pairwise_listwise_sft.json", train_stats["stage23_pairwise_listwise"])
         maybe_eval_all("after_stage23")
+        if _fsdp_enabled(cfg) and str(cfg.stage4_replay_strategy) != "none":
+            model, tokenizer = _reload_fsdp_stage_model(
+                model,
+                tokenizer,
+                out / "stage23_pairwise_listwise_sft_model",
+                cfg,
+            )
     else:
         stage2_items = _with_pointwise_replay(
             pair_items,
@@ -2902,6 +2949,14 @@ def main() -> None:
                 cfg=cfg,
                 output_dir=out,
                 name="stage2_pairwise",
+            )
+
+        if _fsdp_enabled(cfg):
+            model, tokenizer = _reload_fsdp_stage_model(
+                model,
+                tokenizer,
+                out / "stage2_pairwise_sft_model",
+                cfg,
             )
 
         stage3_items = _with_pointwise_replay(
@@ -2941,6 +2996,14 @@ def main() -> None:
                 cfg=cfg,
                 output_dir=out,
                 name="stage3_listwise_top",
+            )
+
+        if _fsdp_enabled(cfg) and str(cfg.stage4_replay_strategy) != "none":
+            model, tokenizer = _reload_fsdp_stage_model(
+                model,
+                tokenizer,
+                out / "stage3_listwise_sft_model",
+                cfg,
             )
 
     if str(cfg.stage4_replay_strategy) != "none":

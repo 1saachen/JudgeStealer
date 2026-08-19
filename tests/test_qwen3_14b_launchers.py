@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LORA = ROOT / "launch_qwen3_14b_gpt5_lora_auto_queue.sh"
 FULLFT = ROOT / "launch_qwen3_14b_gpt5_fullft_fsdp.sh"
 SELECTOR = ROOT / "run_pointwise5answers_three_to_listwise_v1.py"
+RUNNER = ROOT / "run_pointwise5answers_three_stage_pairwise_listwise_sft_v1.py"
 
 
 def read(path: Path) -> str:
@@ -94,3 +95,16 @@ def test_distributed_selector_binds_proxy_and_embedder_to_local_rank():
     assert "device=selector_device," in text
     assert "embedding_device = (" in text
     assert "selector_device\n            if configured_embedding_device.lower()" in text
+
+
+def test_fsdp_runner_reloads_saved_checkpoint_between_training_stages():
+    text = read(RUNNER)
+    assert "def _reload_fsdp_stage_model" in text
+    assert "save_stage_model = (" in text
+    assert "if fsdp_enabled:" in text
+    assert "stage1_pointwise_sft_model" in text
+    assert "stage2_pairwise_sft_model" in text
+    assert "stage3_listwise_sft_model" in text
+    assert "checkpoint_dir" in text
+    assert "out / \"stage2_pairwise_sft_model\"" in text
+    assert "out / \"stage3_listwise_sft_model\"" in text
