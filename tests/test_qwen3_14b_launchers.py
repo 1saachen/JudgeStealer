@@ -65,6 +65,12 @@ def test_fullft_launcher_uses_two_process_fsdp_without_lora_or_4bit():
     assert "GPU_IDS" in text
 
 
+def test_fullft_torchrun_receives_python_script_not_python_executable():
+    text = read(FULLFT)
+    assert '"$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$SCRIPT"' in text
+    assert '"$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$PY"' not in text
+
+
 def test_launchers_protect_completed_and_incomplete_outputs():
     for path in (LORA, FULLFT):
         text = read(path)

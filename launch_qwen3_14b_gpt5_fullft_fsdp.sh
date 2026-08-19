@@ -125,7 +125,7 @@ run_job() {
   log_status "START job=$job gpus=${GPU_IDS[*]} out=$out"
   CUDA_VISIBLE_DEVICES="${GPU_IDS[0]},${GPU_IDS[1]}" PYTHONUNBUFFERED=1 \
   TOKENIZERS_PARALLELISM=false PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    "$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$PY" -u "$SCRIPT" \
+    "$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$SCRIPT" \
       --pointwise-5answers-dataset "$train" \
       --listwise-eval-dataset "$eval" \
       --llama "$MODEL" \
