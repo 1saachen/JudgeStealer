@@ -97,6 +97,7 @@ def build_pairwise_prompt(
     input_text: str,
     assistant_1_output: str,
     assistant_2_output: str,
+    include_verdict_instruction: bool = True,
 ) -> str:
     instruction = (instruction or "").strip()
     input_text = (input_text or "").strip()
@@ -115,7 +116,8 @@ def build_pairwise_prompt(
     parts.append(assistant_2_output)
     parts.append("")
     parts.append("### Judge")
-    parts.append("Please output exactly one of: [[1]] / [[2]] / [[3]].")
+    if bool(include_verdict_instruction):
+        parts.append("Please output exactly one of: [[1]] / [[2]] / [[3]].")
     return "\n".join(parts)
 
 

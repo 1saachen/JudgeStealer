@@ -936,11 +936,17 @@ def _train_sft_on_items(
     train_sources = [x[1] for x in shuffled]
     train_targets = [x[2] for x in shuffled]
     pointwise_score_labels = [int(x[3]) for x in shuffled]
+    pointwise_score_token_ids = base._score_token_ids_for_sft(
+        tokenizer,
+        score_min=int(cfg.score_min),
+        score_max=int(cfg.score_max),
+    )
     train_dataset = base.SFTPairwiseDataset(
         train_sources,
         train_targets,
         tokenizer,
         pointwise_score_labels=pointwise_score_labels,
+        pointwise_score_token_ids=pointwise_score_token_ids,
         pointwise_teacher_logits=shuffled_teacher_logits,
         class_teacher_logits=shuffled_class_teacher_logits,
         class_teacher_task_ids=shuffled_class_teacher_task_ids,
@@ -1104,7 +1110,7 @@ def _train_sft_on_items(
         args=training_args,
         train_dataset=train_dataset,
         data_collator=base._data_collator_sft,
-        score_token_ids=base._score_token_ids_for_sft(tokenizer, score_min=int(cfg.score_min), score_max=int(cfg.score_max)),
+        score_token_ids=pointwise_score_token_ids,
         smooth_alpha=float(stage_smooth_alpha),
         smooth_start_step=int(cfg.pointwise_global_smooth_start_step),
         smooth_warmup_steps=int(cfg.pointwise_global_smooth_warmup_steps),
