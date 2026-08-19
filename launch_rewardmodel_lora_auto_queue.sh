@@ -230,6 +230,8 @@ run_ours() {
     --selector-pool-size 100 \
     --selector-proxy-warmup-epochs 3 \
     --selector-proxy-update-epochs 1 \
+    --pairwise-order-augmentation \
+    --listwise-order-augmentation \
     --smooth-alpha 0.1 \
     "${COMMON_ARGS[@]}"
 }

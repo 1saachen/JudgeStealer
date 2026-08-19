@@ -59,3 +59,14 @@ def test_rewardmodel_queue_keeps_naive_and_ours_protocols_distinct():
         "--smooth-alpha 0.1",
     ):
         assert ours_argument in text
+
+
+def test_rewardmodel_ours_enables_pairwise_and_listwise_order_augmentation():
+    text = LAUNCHER.read_text(encoding="utf-8")
+    ours = text.split("run_ours() {", 1)[1].split("\nrun_job() {", 1)[0]
+    naive = text.split("run_naive() {", 1)[1].split("\nrun_ours() {", 1)[0]
+
+    assert "--pairwise-order-augmentation" in ours
+    assert "--listwise-order-augmentation" in ours
+    assert "--pairwise-order-augmentation" not in naive
+    assert "--listwise-order-augmentation" not in naive
