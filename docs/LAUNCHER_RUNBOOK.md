@@ -235,7 +235,7 @@ Claude 的八项 LoRA + 4-bit 实验使用：
 
 ## 11. Qwen3-14B GPT-5 补跑
 
-14B 的 GPT-5 补跑分成两个启动器：LoRA 队列使用单卡，Full-FT 使用两张卡的
+14B 的 GPT-5 补跑分成两个启动器：LoRA 队列使用单卡，Full-FT 使用四张卡的
 FSDP。两者都使用模型目录 `models/Qwen3-14B`，并将结果写到 NVMe。Full-FT 的
 主模型 Stage 1/2/3/4 仍然是未量化的全参数训练；由于选样 proxy 在 FSDP 主训练
 之前初始化，14B Full-FT 启动器单独使用 `candidate-selector-finetune-mode lora`
@@ -255,11 +255,11 @@ LoRA 的日志位于：
 tail -f /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs/qwen3_14b_gpt5_lora_auto_queue_logs/job_status.log
 ```
 
-Full-FT 必须提供两张不同且都空闲的 GPU。脚本会等待两张卡同时空闲，然后依次运行
+Full-FT 必须提供四张不同且都空闲的 GPU。脚本会等待四张卡同时空闲，然后依次运行
 Alpaca 和 GPT4All，避免同一 GPU 对被两个 FSDP 作业复用：
 
 ```bash
-./launch_qwen3_14b_gpt5_fullft_fsdp.sh 2 3
+./launch_qwen3_14b_gpt5_fullft_fsdp.sh 2 3 4 5
 ```
 
 Full-FT 的日志位于：

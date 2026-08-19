@@ -42,11 +42,11 @@ def test_lora_launcher_uses_single_gpu_lora_protocol():
     assert 'SKIP_JOBS="${SKIP_JOBS:-}"' in text
 
 
-def test_fullft_launcher_uses_two_process_fsdp_without_lora_or_4bit():
+def test_fullft_launcher_uses_four_process_fsdp_without_lora_or_4bit():
     text = read(FULLFT)
     for argument in (
         "torchrun",
-        "--nproc_per_node=2",
+        "--nproc_per_node=4",
         "--fsdp",
         "full_shard auto_wrap",
         "--fsdp-transformer-layer-cls-to-wrap Qwen3DecoderLayer",
@@ -68,10 +68,13 @@ def test_fullft_launcher_uses_two_process_fsdp_without_lora_or_4bit():
     assert "GPU_IDS" in text
 
 
-def test_fullft_torchrun_receives_python_script_not_python_executable():
+def test_fullft_torchrun_uses_four_gpu_arguments_and_receives_script():
     text = read(FULLFT)
-    assert '"$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$SCRIPT"' in text
-    assert '"$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$PY"' not in text
+    assert '"$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$SCRIPT"' in text
+    assert '"$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$PY"' not in text
+    assert 'if [[ "$#" -ne 4 ]]' in text
+    assert 'CUDA_VISIBLE_DEVICES="$(IFS=,; echo "${GPU_IDS[*]}")"' in text
+    assert 'all_gpus_are_idle' in text
 
 
 def test_launchers_protect_completed_and_incomplete_outputs():

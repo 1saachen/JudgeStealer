@@ -12,8 +12,8 @@
 | --- | --- | --- | --- |
 | Alpaca | LoRA + 4-bit | 单卡 | `qwen3_14b_alpaca_gpt5_b600_lora_` |
 | GPT4All | LoRA + 4-bit | 单卡 | `qwen3_14b_gpt4all_gpt5_b600_lora_` |
-| Alpaca | Full-FT | 两卡 FSDP | `qwen3_14b_alpaca_gpt5_b600_fullft_` |
-| GPT4All | Full-FT | 两卡 FSDP | `qwen3_14b_gpt4all_gpt5_b600_fullft_` |
+| Alpaca | Full-FT | 四卡 FSDP | `qwen3_14b_alpaca_gpt5_b600_fullft_` |
+| GPT4All | Full-FT | 四卡 FSDP | `qwen3_14b_gpt4all_gpt5_b600_fullft_` |
 
 模型目录固定为 `models/Qwen3-14B`。输出默认放在
 `/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs`，可以由 `OUTPUT_ROOT`
@@ -46,8 +46,8 @@
 
 ## Full-FT 启动器
 
-新建两卡 FSDP 启动器。它接受两个 GPU 编号，在两张卡都空闲时，用 `torchrun`
-以两个进程启动单个任务；两个数据集依序完成。FSDP 使用 `full_shard auto_wrap`、
+新建四卡 FSDP 启动器。它接受四个 GPU 编号，在四张卡都空闲时，用 `torchrun`
+以四个进程启动单个任务；两个数据集依序完成。FSDP 使用 `full_shard auto_wrap`、
 `Qwen3DecoderLayer`、activation checkpointing 和 `FULL_STATE_DICT`，只保存最后
 阶段。主模型不传递 LoRA 或 4-bit 参数；由于 selector proxy 在 FSDP 主训练前初始化，
 selector proxy 单独使用 LoRA + 4-bit（通过 `--candidate-selector-load-in-4bit`），
@@ -72,7 +72,7 @@ LoRA 预期使用方式：
 Full-FT 预期使用方式：
 
 ```bash
-./launch_qwen3_14b_gpt5_fullft_fsdp.sh 2 3
+./launch_qwen3_14b_gpt5_fullft_fsdp.sh 2 3 4 5
 ```
 
 两种脚本均可在 tmux 中运行；状态日志用于查看进度，`metrics_compact.json` 是任务

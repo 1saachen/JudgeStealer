@@ -14,11 +14,11 @@ POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
 SKIP_JOBS="${SKIP_JOBS:-}"
 
-if [[ "$#" -ne 2 ]]; then
-  echo "usage: $0 <gpu_id_a> <gpu_id_b>" >&2
+if [[ "$#" -ne 4 ]]; then
+  echo "usage: $0 <gpu_id_a> <gpu_id_b> <gpu_id_c> <gpu_id_d>" >&2
   exit 2
 fi
-GPU_IDS=("$1" "$2")
+GPU_IDS=("$1" "$2" "$3" "$4")
 JOBS=(alpaca gpt4all)
 
 mkdir -p "$OUTPUT_ROOT" "$LOG_ROOT" || exit 1
@@ -123,9 +123,9 @@ run_job() {
   fi
 
   log_status "START job=$job gpus=${GPU_IDS[*]} out=$out"
-  CUDA_VISIBLE_DEVICES="${GPU_IDS[0]},${GPU_IDS[1]}" PYTHONUNBUFFERED=1 \
+  CUDA_VISIBLE_DEVICES="$(IFS=,; echo "${GPU_IDS[*]}")" PYTHONUNBUFFERED=1 \
   TOKENIZERS_PARALLELISM=false PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    "$TORCHRUN_BIN" --standalone --nproc_per_node=2 "$SCRIPT" \
+    "$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$SCRIPT" \
       --pointwise-5answers-dataset "$train" \
       --listwise-eval-dataset "$eval" \
       --llama "$MODEL" \
@@ -178,16 +178,27 @@ for gpu in "${GPU_IDS[@]}"; do
     exit 2
   fi
 done
-if [[ "${GPU_IDS[0]}" == "${GPU_IDS[1]}" ]]; then
-  echo "two distinct GPU ids are required" >&2
-  exit 2
-fi
+declare -A SEEN_GPU_IDS=()
+for gpu in "${GPU_IDS[@]}"; do
+  if [[ -n "${SEEN_GPU_IDS[$gpu]+seen}" ]]; then
+    echo "four distinct GPU ids are required" >&2
+    exit 2
+  fi
+  SEEN_GPU_IDS[$gpu]=1
+done
+
+all_gpus_are_idle() {
+  local gpu
+  for gpu in "${GPU_IDS[@]}"; do
+    gpu_is_idle "$gpu" || return 1
+  done
+}
 
 overall_rc=0
 for job in "${JOBS[@]}"; do
   should_skip_job "$job" && { log_status "SKIP configured job=$job"; continue; }
   resolve_job "$job" || exit 1
-  while ! gpu_is_idle "${GPU_IDS[0]}" || ! gpu_is_idle "${GPU_IDS[1]}"; do
+  while ! all_gpus_are_idle; do
     log_status "WAIT job=$job gpus=${GPU_IDS[*]} reason=not_idle"
     sleep "$POLL_SECONDS"
   done
