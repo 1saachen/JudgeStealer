@@ -20,7 +20,7 @@
 | --- | --- |
 | 项目根目录 | `/data/model-extraction-attack/yaolin/JudgeStealer` |
 | Conda 环境 | `cyl` |
-| 模型目录 | `models/Qwen3-0.6B`、`models/Qwen3-1.7B`、`models/Qwen3-4B`、`models/Qwen3-8B` |
+| 模型目录 | `models/Qwen3-0.6B`、`models/Qwen3-1.7B`、`models/Qwen3-4B`、`models/Qwen3-8B`、`models/Qwen3-14B` |
 | Alpaca GPT-5 训练集 | `data/alpaca/gpt5/train-20k.json` |
 | Alpaca GPT-5 验证集 | `data/alpaca/gpt5/val-2k-eval-listwise.json` |
 | GPT4All GPT-5 训练集 | `data/gpt4all/gpt5/train9k_pointwise_pairwise_no_val_overlap.json` |
@@ -222,3 +222,57 @@ find /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs \
 9. 在 README 或本手册中记录一条可直接复制的启动命令、日志命令、结果命令和失败恢复步骤。
 
 这个结构可以直接复用于后续 LoRA、Full-FT、消融实验和不同模型规模的启动脚本；只需替换具体数据、模型、参数和输出名称。
+
+## 10. Claude LoRA 队列
+
+Claude 的八项 LoRA + 4-bit 实验使用：
+
+```bash
+./launch_claude_lora_auto_queue.sh 1 2 3 4 5
+```
+
+它统一调度 Llama-3.2-1B-Instruct 和 Qwen3-1.7B 在 Alpaca/GPT4All Claude 数据上的四项 Selector 主实验和四项 MixEp10 对照。与 GPT-5 队列不同，Claude 必须显式使用同一份 `val.json` 作为 pairwise 和 listwise 验证输入。完整协议、模型下载和结果命令见 [`CLAUDE_LORA_EXPERIMENTS.md`](CLAUDE_LORA_EXPERIMENTS.md)。
+
+## 11. Qwen3-14B GPT-5 补跑
+
+14B 的 GPT-5 补跑分成两个启动器：LoRA 队列使用单卡，Full-FT 使用两张卡的
+FSDP。两者都使用模型目录 `models/Qwen3-14B`，并将结果写到 NVMe。
+
+LoRA 允许多个任务在不同空闲 GPU 上并行：
+
+```bash
+./launch_qwen3_14b_gpt5_lora_auto_queue.sh 2 3 4 5
+```
+
+LoRA 的日志位于：
+
+```bash
+tail -f /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs/qwen3_14b_gpt5_lora_auto_queue_logs/job_status.log
+```
+
+Full-FT 必须提供两张不同且都空闲的 GPU。脚本会等待两张卡同时空闲，然后依次运行
+Alpaca 和 GPT4All，避免同一 GPU 对被两个 FSDP 作业复用：
+
+```bash
+./launch_qwen3_14b_gpt5_fullft_fsdp.sh 2 3
+```
+
+Full-FT 的日志位于：
+
+```bash
+tail -f /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs/qwen3_14b_gpt5_fullft_fsdp_logs/job_status.log
+```
+
+LoRA 可按任务名跳过：
+
+```bash
+SKIP_JOBS="alpaca" ./launch_qwen3_14b_gpt5_lora_auto_queue.sh 2 3 4 5
+```
+
+四个结果的完成标志仍是 `metrics_compact.json`。只查看指标而不复制模型权重：
+
+```bash
+find /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs \
+  -maxdepth 1 -type d -name 'qwen3_14b_*_gpt5_*' \
+  -exec sh -c 'test -f "$1/metrics_compact.json" && printf "\n== %s ==\n" "$1" && python -m json.tool "$1/metrics_compact.json"' _ {} \;
+```
