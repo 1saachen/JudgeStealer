@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LORA = ROOT / "launch_qwen3_14b_gpt5_lora_auto_queue.sh"
 FULLFT = ROOT / "launch_qwen3_14b_gpt5_fullft_fsdp.sh"
+SELECTOR = ROOT / "run_pointwise5answers_three_to_listwise_v1.py"
 
 
 def read(path: Path) -> str:
@@ -83,3 +84,13 @@ def test_launchers_protect_completed_and_incomplete_outputs():
         assert 'metrics_compact.json' in text
         assert 'if [[ -e "$out" ]]' in text
         assert "job_status.log" in text
+
+
+def test_distributed_selector_binds_proxy_and_embedder_to_local_rank():
+    text = read(SELECTOR)
+    assert "def _candidate_selector_device()" in text
+    assert 'local_rank = int(os.environ.get("LOCAL_RANK", "0"))' in text
+    assert "torch.cuda.set_device(local_rank)" in text
+    assert "device=selector_device," in text
+    assert "embedding_device = (" in text
+    assert "selector_device\n            if configured_embedding_device.lower()" in text

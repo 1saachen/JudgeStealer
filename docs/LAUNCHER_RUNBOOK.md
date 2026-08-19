@@ -241,7 +241,9 @@ FSDP。两者都使用模型目录 `models/Qwen3-14B`，并将结果写到 NVMe�
 之前初始化，14B Full-FT 启动器单独使用 `candidate-selector-finetune-mode lora`
 和 `candidate-selector-load-in-4bit`，避免每个 rank 各自加载一份完整 proxy 导致
 Adam 状态 OOM。这个设置应在结果表或实验记录中标注为“Full-FT surrogate，LoRA
-+ 4-bit candidate selector”。
++ 4-bit candidate selector”。多卡运行时，selector proxy 和 bias-trap embedding
+模型会按 `LOCAL_RANK` 绑定到各自的可见 GPU；例如传入 `1 2 3 4` 时，四个 rank
+分别使用物理 GPU `1/2/3/4`，不应全部落到 GPU 1。
 
 LoRA 允许多个任务在不同空闲 GPU 上并行：
 

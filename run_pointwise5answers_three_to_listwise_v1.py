@@ -1872,6 +1872,20 @@ def _resolve_candidate_selector_finetune_mode(cfg: Any) -> str:
     return mode
 
 
+def _candidate_selector_device() -> Optional[str]:
+    """Pin each torchrun rank's selector models to its own visible GPU."""
+    if not torch.cuda.is_available():
+        return None
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    visible_count = int(torch.cuda.device_count())
+    if local_rank < 0 or local_rank >= visible_count:
+        raise RuntimeError(
+            f"LOCAL_RANK={local_rank} is invalid for {visible_count} visible CUDA devices"
+        )
+    torch.cuda.set_device(local_rank)
+    return f"cuda:{local_rank}"
+
+
 def _select_candidate_triples_with_selector(
     *,
     candidates: Sequence[CandidateTripleExample],
@@ -1974,6 +1988,7 @@ def _select_candidate_triples_with_selector(
         if selector_proxy_mode != "lm_head":
             raise ValueError("--reuse-selection-proxy-for-stage1 requires candidate_selector_proxy_mode='lm_head'")
 
+    selector_device = _candidate_selector_device()
     target_proxy: Optional[base.LlamaSharedMultiTaskProxyModel] = None
     if str(cfg.candidate_selector_target_task) == "pointwise":
         target_proxy = base.LlamaSharedMultiTaskProxyModel(
@@ -1984,6 +1999,7 @@ def _select_candidate_triples_with_selector(
             lr=float(cfg.proxy_lr),
             weight_decay=0.0,
             max_length=int(cfg.proxy_max_length),
+            device=selector_device,
             finetune_mode=_resolve_candidate_selector_finetune_mode(cfg),
             gradient_checkpointing=True,
             load_in_4bit=bool(getattr(cfg, "candidate_selector_load_in_4bit", cfg.load_in_4bit)),
@@ -2028,11 +2044,19 @@ def _select_candidate_triples_with_selector(
     bias_trap_embedding_cache: Dict[int, np.ndarray] = {}
     bias_trap_prefix_embeddings: Optional[np.ndarray] = None
     if selector_kind == "bias_trap_pointwise":
+        configured_embedding_device = str(
+            getattr(cfg, "candidate_selector_embedding_device", "auto")
+        )
+        embedding_device = (
+            selector_device
+            if configured_embedding_device.lower() in {"", "auto"}
+            else configured_embedding_device
+        )
         bias_trap_embedder = TransformerTextEmbedder(
             str(getattr(cfg, "candidate_selector_embedding_model", DEFAULT_SELECTOR_EMBEDDING_MODEL)),
             max_length=int(getattr(cfg, "candidate_selector_embedding_max_length", DEFAULT_SELECTOR_EMBEDDING_MAX_LENGTH)),
             batch_size=int(getattr(cfg, "candidate_selector_embedding_batch_size", 64)),
-            device=str(getattr(cfg, "candidate_selector_embedding_device", "auto")),
+            device=embedding_device or "auto",
             pooling=str(getattr(cfg, "candidate_selector_embedding_pooling", "cls")),
         )
         bias_trap_prefix_embeddings = bias_trap_embedder.encode(DEFAULT_VERBOSITY_PREFIXES)
