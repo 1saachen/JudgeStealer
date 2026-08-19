@@ -160,6 +160,7 @@ class AnswerWithScore:
     model: str
     output: str
     score: int
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -186,6 +187,7 @@ class PointwiseScoredExample:
     score: int
     label: int
     prompt: str
+    reason: str = ""
 
     def __str__(self) -> str:  # noqa: D105
         return self.prompt
@@ -1046,6 +1048,7 @@ def _load_scored_questions(
                 model_row = {
                     "model": rec.get(model_key, ""),
                     "output": rec.get(output_key, ""),
+                    "reason": rec.get(f"reason{ans_i}", ""),
                 }
                 if score_key in rec:
                     model_row["score"] = rec.get(score_key, None)
@@ -1069,6 +1072,7 @@ def _load_scored_questions(
                     model_row = {
                         "model": rec.get(model_key, ans_key),
                         "output": rec.get(output_key, rec.get(answer_key, "")),
+                        "reason": rec.get(f"reason{ans_key}", ""),
                     }
                     if score_key in rec:
                         model_row["score"] = rec.get(score_key, None)
@@ -1096,7 +1100,14 @@ def _load_scored_questions(
                 stats["answers_empty_output"] += 1
                 continue
 
-            answers.append(AnswerWithScore(model=model_name, output=output, score=int(score)))
+            answers.append(
+                AnswerWithScore(
+                    model=model_name,
+                    output=output,
+                    score=int(score),
+                    reason=str(m.get("reason", "") or "").strip(),
+                )
+            )
             stats["answers_valid"] += 1
 
         if len(answers) < 2:
@@ -3012,6 +3023,7 @@ class SFTPairwiseDataset(Dataset):
         targets: Sequence[str],
         tokenizer,
         pointwise_score_labels: Optional[Sequence[int]] = None,
+        pointwise_score_token_ids: Optional[Sequence[Sequence[int]]] = None,
         pointwise_teacher_logits: Optional[Sequence[Optional[Sequence[float]]]] = None,
         class_teacher_logits: Optional[Sequence[Optional[Sequence[float]]]] = None,
         class_teacher_task_ids: Optional[Sequence[int]] = None,
@@ -3039,6 +3051,26 @@ class SFTPairwiseDataset(Dataset):
                     f"{len(pointwise_score_labels)} != {len(self.input_ids)}"
                 )
             self.pointwise_score_labels = [int(x) for x in pointwise_score_labels]
+        self.pointwise_score_positions = [IGNORE_INDEX] * len(self.input_ids)
+        if pointwise_score_token_ids is not None:
+            score_sequences = [[int(token_id) for token_id in ids] for ids in pointwise_score_token_ids]
+            for row_index, (label, labels) in enumerate(zip(self.pointwise_score_labels, self.labels)):
+                if not 0 <= int(label) < len(score_sequences):
+                    continue
+                needle = score_sequences[int(label)]
+                if not needle:
+                    raise ValueError("pointwise score token sequence must not be empty")
+                values = [int(x) for x in labels.tolist()]
+                position = -1
+                for start in range(0, len(values) - len(needle) + 1):
+                    if values[start : start + len(needle)] == needle:
+                        position = int(start)
+                if position < 0:
+                    raise ValueError(
+                        "could not locate the final pointwise score token sequence in target: "
+                        f"row={row_index} label={label}"
+                    )
+                self.pointwise_score_positions[row_index] = int(position)
         self.pointwise_teacher_logits: Optional[List[Optional[List[float]]]] = None
         if pointwise_teacher_logits is not None:
             if len(pointwise_teacher_logits) != len(self.input_ids):
@@ -3132,6 +3164,7 @@ class SFTPairwiseDataset(Dataset):
             input_ids=self.input_ids[i],
             labels=self.labels[i],
             pointwise_score_label=int(self.pointwise_score_labels[i]),
+            pointwise_score_position=int(self.pointwise_score_positions[i]),
             choice_source_length=int(self.choice_source_lengths[i]),
         )
         if self.pointwise_teacher_logits is not None:
@@ -3565,8 +3598,16 @@ def _train_sft_pairwise(
     return stats
 
 
-def _pointwise_sft_target(example: PointwiseScoredExample, *, fix_score_prefix_in_prompt: bool) -> str:
+def _pointwise_sft_target(
+    example: PointwiseScoredExample,
+    *,
+    fix_score_prefix_in_prompt: bool,
+    cot_feedback: bool = False,
+) -> str:
     score_text = str(int(example.score))
+    reason = str(getattr(example, "reason", "") or "").strip()
+    if bool(cot_feedback) and reason:
+        return f"{reason}\nScore: [{score_text}]" + DEFAULT_EOS_TOKEN
     if bool(fix_score_prefix_in_prompt):
         return score_text + "]" + DEFAULT_EOS_TOKEN
     return f"Score: [{score_text}]" + DEFAULT_EOS_TOKEN
@@ -3700,6 +3741,7 @@ def _data_collator_sft(batch: List[Dict[str, Any]]):
     labels_list = []
     attention_mask_list = []
     pointwise_score_labels = []
+    pointwise_score_positions = []
     choice_source_lengths = []
     choice_target_distributions = []
     choice_candidate_token_ids = []
@@ -3742,6 +3784,7 @@ def _data_collator_sft(batch: List[Dict[str, Any]]):
         labels_list.append(labels_padded)
         attention_mask_list.append(attention_mask)
         pointwise_score_labels.append(int(item.get("pointwise_score_label", IGNORE_INDEX)))
+        pointwise_score_positions.append(int(item.get("pointwise_score_position", IGNORE_INDEX)))
         choice_source_lengths.append(int(item.get("choice_source_length", len(input_ids))))
         if has_choice_targets:
             choice_target_distributions.append(item.get("choice_target_distribution"))
@@ -3785,6 +3828,7 @@ def _data_collator_sft(batch: List[Dict[str, Any]]):
         "labels": torch.stack(labels_list),
         "attention_mask": torch.stack(attention_mask_list),
         "pointwise_score_labels": torch.tensor(pointwise_score_labels, dtype=torch.long),
+        "pointwise_score_positions": torch.tensor(pointwise_score_positions, dtype=torch.long),
     }
     if has_choice_targets:
         out["choice_source_lengths"] = torch.tensor(choice_source_lengths, dtype=torch.long)
@@ -4033,6 +4077,7 @@ class OnlineGlobalPriorSFTTrainer(Trainer):
         choice_target_distributions = inputs.pop("choice_target_distributions", None)
         choice_candidate_token_ids = inputs.pop("choice_candidate_token_ids", None)
         pointwise_score_labels = inputs.pop("pointwise_score_labels", None)
+        pointwise_score_positions = inputs.pop("pointwise_score_positions", None)
         pointwise_teacher_logits = inputs.pop("pointwise_teacher_logits", None)
         pointwise_teacher_mask = inputs.pop("pointwise_teacher_mask", None)
         class_teacher_logits = inputs.pop("class_teacher_logits", None)
@@ -4065,7 +4110,11 @@ class OnlineGlobalPriorSFTTrainer(Trainer):
             label_mask = labels.ne(IGNORE_INDEX)
             has_label = label_mask.any(dim=1)
             first_label_pos = label_mask.to(dtype=torch.int64).argmax(dim=1)
-            valid_score = valid_score & has_label & (first_label_pos > 0)
+            if pointwise_score_positions is not None:
+                score_token_pos = pointwise_score_positions.to(device=labels.device, dtype=torch.long)
+            else:
+                score_token_pos = first_label_pos
+            valid_score = valid_score & has_label & (score_token_pos > 0)
 
             alpha_t = self._current_smooth_alpha(device=labels.device, dtype=shift_logits.dtype)
             local_has_score = bool(valid_score.any().item())
@@ -4077,7 +4126,7 @@ class OnlineGlobalPriorSFTTrainer(Trainer):
             if float(alpha_t.detach().item()) > 0.0 and global_has_score:
                 if local_has_score:
                     batch_idx = torch.arange(labels.size(0), device=labels.device)[valid_score]
-                    score_shift_pos = first_label_pos[valid_score] - 1
+                    score_shift_pos = score_token_pos[valid_score] - 1
                     valid_score_labels = score_labels[valid_score]
                 else:
                     # FSDP requires every rank to execute the same nested model
