@@ -16,6 +16,8 @@ ALPACA_COT_DATA_DIR="${ALPACA_COT_DATA_DIR:-$DATA_ROOT/Alpaca-cot-gpt}"
 GPT4ALL_COT_DATA_DIR="${GPT4ALL_COT_DATA_DIR:-$DATA_ROOT/GPT4All-cot-gpt}"
 ALPACA_COT_PREPARED_DIR="${ALPACA_COT_PREPARED_DIR:-$(dirname "$ALPACA_COT_DATA_DIR")/prepared_4066}"
 GPT4ALL_COT_PREPARED_DIR="${GPT4ALL_COT_PREPARED_DIR:-$(dirname "$GPT4ALL_COT_DATA_DIR")/prepared_4066}"
+LLAMA_MODEL="${LLAMA_MODEL:-$ROOT/models/Llama-3.2-1b-instruct}"
+QWEN_MODEL="${QWEN_MODEL:-$ROOT/models/Qwen3-1.7B}"
 
 if [[ "$#" -eq 0 ]]; then
   echo "usage: $0 <gpu_id> [gpu_id ...]" >&2
@@ -130,14 +132,14 @@ run_job() {
   local dataset surrogate paper_method mode model prepared_dir name out log rc required_file
 
   case "$job" in
-    alpaca_llama_naive) dataset=alpaca; surrogate=llama3_1b; paper_method=naive; model="$ROOT/llama/Llama-3.2-1B-Instruct" ;;
-    alpaca_llama_ours) dataset=alpaca; surrogate=llama3_1b; paper_method=ours; model="$ROOT/llama/Llama-3.2-1B-Instruct" ;;
-    alpaca_qwen_naive) dataset=alpaca; surrogate=qwen3_1p7b; paper_method=naive; model="$ROOT/qwen/Qwen3-1.7B" ;;
-    alpaca_qwen_ours) dataset=alpaca; surrogate=qwen3_1p7b; paper_method=ours; model="$ROOT/qwen/Qwen3-1.7B" ;;
-    gpt4all_llama_naive) dataset=gpt4all; surrogate=llama3_1b; paper_method=naive; model="$ROOT/llama/Llama-3.2-1B-Instruct" ;;
-    gpt4all_llama_ours) dataset=gpt4all; surrogate=llama3_1b; paper_method=ours; model="$ROOT/llama/Llama-3.2-1B-Instruct" ;;
-    gpt4all_qwen_naive) dataset=gpt4all; surrogate=qwen3_1p7b; paper_method=naive; model="$ROOT/qwen/Qwen3-1.7B" ;;
-    gpt4all_qwen_ours) dataset=gpt4all; surrogate=qwen3_1p7b; paper_method=ours; model="$ROOT/qwen/Qwen3-1.7B" ;;
+    alpaca_llama_naive) dataset=alpaca; surrogate=llama3_1b; paper_method=naive; model="$LLAMA_MODEL" ;;
+    alpaca_llama_ours) dataset=alpaca; surrogate=llama3_1b; paper_method=ours; model="$LLAMA_MODEL" ;;
+    alpaca_qwen_naive) dataset=alpaca; surrogate=qwen3_1p7b; paper_method=naive; model="$QWEN_MODEL" ;;
+    alpaca_qwen_ours) dataset=alpaca; surrogate=qwen3_1p7b; paper_method=ours; model="$QWEN_MODEL" ;;
+    gpt4all_llama_naive) dataset=gpt4all; surrogate=llama3_1b; paper_method=naive; model="$LLAMA_MODEL" ;;
+    gpt4all_llama_ours) dataset=gpt4all; surrogate=llama3_1b; paper_method=ours; model="$LLAMA_MODEL" ;;
+    gpt4all_qwen_naive) dataset=gpt4all; surrogate=qwen3_1p7b; paper_method=naive; model="$QWEN_MODEL" ;;
+    gpt4all_qwen_ours) dataset=gpt4all; surrogate=qwen3_1p7b; paper_method=ours; model="$QWEN_MODEL" ;;
     *) log_status "ERROR unknown job=$job"; return 2 ;;
   esac
 

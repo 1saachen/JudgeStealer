@@ -39,3 +39,12 @@ def test_launcher_defaults_outputs_to_local_nvme():
 
     assert 'DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"' in text
     assert 'OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"' in text
+
+
+def test_launcher_uses_server_model_directories():
+    text = LAUNCHER.read_text(encoding="utf-8")
+
+    assert 'LLAMA_MODEL="${LLAMA_MODEL:-$ROOT/models/Llama-3.2-1b-instruct}"' in text
+    assert 'QWEN_MODEL="${QWEN_MODEL:-$ROOT/models/Qwen3-1.7B}"' in text
+    assert 'model="$LLAMA_MODEL"' in text
+    assert 'model="$QWEN_MODEL"' in text
