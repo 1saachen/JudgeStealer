@@ -926,9 +926,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--eval-batch-size", type=int, default=1)
-    parser.add_argument("--eval-max-new-tokens", type=int, default=384)
+    parser.add_argument("--eval-max-new-tokens", type=int, default=512)
     parser.add_argument("--synthetic-batch-size", type=int, default=4)
-    parser.add_argument("--synthetic-max-new-tokens", type=int, default=256)
+    parser.add_argument("--synthetic-max-new-tokens", type=int, default=384)
     parser.add_argument(
         "--include-pointwise-assessments-in-synthesis",
         action=argparse.BooleanOptionalAction,

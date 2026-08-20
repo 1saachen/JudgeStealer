@@ -77,5 +77,5 @@ def test_cot_prompts_preserve_legacy_judging_rules_without_label_only_conflict()
 
 def test_synthesis_uses_explicit_generation_budgets():
     text = (runner.ROOT / "run_alpaca_cot_stage4_mix.py").read_text(encoding="utf-8")
-    assert 'parser.add_argument("--eval-max-new-tokens", type=int, default=384)' in text
-    assert 'parser.add_argument("--synthetic-max-new-tokens", type=int, default=256)' in text
+    assert 'parser.add_argument("--eval-max-new-tokens", type=int, default=512)' in text
+    assert 'parser.add_argument("--synthetic-max-new-tokens", type=int, default=384)' in text

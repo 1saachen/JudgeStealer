@@ -206,8 +206,8 @@ run_job() {
       --learning-rate 1e-4 \
       --max-length 4096 \
       --eval-batch-size 1 \
-      --eval-max-new-tokens 384 \
-      --synthetic-max-new-tokens 256 \
+      --eval-max-new-tokens 512 \
+      --synthetic-max-new-tokens 384 \
       --use-lora \
       --load-in-4bit \
       >"$log" 2>&1
