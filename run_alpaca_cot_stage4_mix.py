@@ -341,7 +341,7 @@ def _private_pair_prompt(
     include_pointwise_assessments: bool = False,
 ) -> str:
     public = base.build_pairwise_prompt(
-        system_prompt=PAIRWISE_SYNTH_SYSTEM_PROMPT,
+        system_prompt=PAIRWISE_COT_SYSTEM_PROMPT,
         instruction=str(triple.instruction),
         input_text=str(triple.input_text),
         assistant_1_output=str(left.output),
@@ -355,7 +355,12 @@ def _private_pair_prompt(
     if bool(include_pointwise_assessments):
         evidence[0] += f"; assessment={str(left.reason)}"
         evidence[1] += f"; assessment={str(right.reason)}"
-    return public + "\n\nPrivate pointwise evidence (use internally; do not quote scores):\n" + "\n".join(evidence) + "\nConcise comparison explanation:"
+    return (
+        public
+        + "\n\nPrivate pointwise evidence (use internally; do not quote scores):\n"
+        + "\n".join(evidence)
+        + "\nFollow the evaluation format above: provide a brief explanation, then end with the required final line."
+    )
 
 
 def _private_list_prompt(
@@ -365,7 +370,7 @@ def _private_list_prompt(
     include_pointwise_assessments: bool = False,
 ) -> str:
     public = lw._build_listwise_prompt(
-        system_prompt=LISTWISE_SYNTH_SYSTEM_PROMPT,
+        system_prompt=LISTWISE_COT_SYSTEM_PROMPT,
         instruction=str(triple.instruction),
         input_text=str(triple.input_text),
         assistant_a_output=str(answers[0].output),
@@ -386,7 +391,7 @@ def _private_list_prompt(
         public
         + "\n\nPrivate pointwise evidence (use internally; do not quote scores):\n"
         + evidence
-        + "\nConcise ranking explanation:"
+        + "\nFollow the evaluation format above: provide a brief explanation, then end with the required final ranking."
     )
 
 
@@ -921,9 +926,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--eval-batch-size", type=int, default=1)
-    parser.add_argument("--eval-max-new-tokens", type=int, default=192)
+    parser.add_argument("--eval-max-new-tokens", type=int, default=384)
     parser.add_argument("--synthetic-batch-size", type=int, default=4)
-    parser.add_argument("--synthetic-max-new-tokens", type=int, default=128)
+    parser.add_argument("--synthetic-max-new-tokens", type=int, default=256)
     parser.add_argument(
         "--include-pointwise-assessments-in-synthesis",
         action=argparse.BooleanOptionalAction,

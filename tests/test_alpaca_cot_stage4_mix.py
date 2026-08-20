@@ -47,13 +47,13 @@ def test_cot_smoothing_finds_final_score_instead_of_reason_digit():
     assert position > next(index for index, token in enumerate(labels) if token == score_ids[1][0])
 
 
-def test_private_pair_prompt_does_not_request_a_verdict():
+def test_private_pair_prompt_reuses_original_cot_prompt_with_private_scores():
     answer_a = base.AnswerWithScore("a", "answer a", 8, "strong")
     answer_b = base.AnswerWithScore("b", "answer b", 5, "weaker")
     triple = SimpleNamespace(instruction="Do it", input_text="", answer_a=answer_a, answer_b=answer_b)
     prompt = runner._private_pair_prompt(triple, answer_a, answer_b)
     assert "Private pointwise evidence" in prompt
-    assert "Please output exactly one of" not in prompt
+    assert "Before the final line, provide a brief explanation" in prompt
     assert "assessment=" not in prompt
     public_train_prompt = runner._pairwise_train_prompt("Do it", "", answer_a.output, answer_b.output)
     assert "Private pointwise evidence" not in public_train_prompt
@@ -73,3 +73,9 @@ def test_cot_prompts_preserve_legacy_judging_rules_without_label_only_conflict()
     assert "First provide a brief explanation" in runner.LISTWISE_COT_SYSTEM_PROMPT
     prompt = runner._pairwise_train_prompt("Do it", "", "answer 1", "answer 2")
     assert "Please output exactly one of" not in prompt
+
+
+def test_synthesis_uses_explicit_generation_budgets():
+    text = (runner.ROOT / "run_alpaca_cot_stage4_mix.py").read_text(encoding="utf-8")
+    assert 'parser.add_argument("--eval-max-new-tokens", type=int, default=384)' in text
+    assert 'parser.add_argument("--synthetic-max-new-tokens", type=int, default=256)' in text
