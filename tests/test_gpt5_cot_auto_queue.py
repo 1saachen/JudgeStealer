@@ -32,3 +32,10 @@ def test_launcher_treats_all_positionals_as_allowed_gpus():
     assert 'JOBS=("${ALL_JOBS[@]}")' in text
     assert 'GPU_WORKER_PIDS' in text
     assert 'SKIP_JOBS="${SKIP_JOBS:-}"' in text
+
+
+def test_launcher_defaults_outputs_to_local_nvme():
+    text = LAUNCHER.read_text(encoding="utf-8")
+
+    assert 'DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"' in text
+    assert 'OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"' in text

@@ -3,7 +3,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON_BIN:-python}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-$ROOT/outputs}"
+DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"
+OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"
 LOG_ROOT="$OUTPUT_ROOT/gpt5_cot_auto_queue_logs"
 STATUS_LOG="$LOG_ROOT/job_status.log"
 POLL_SECONDS="${POLL_SECONDS:-30}"
