@@ -45,9 +45,14 @@ export GPT4ALL_REWARDMODEL_SOURCE=/path/to/gpt4all/reward-model
 Naive 不使用 selector，三阶段最终各取 200 个训练例，分别训练 10 个
 epoch，关闭平滑。
 
-Ours 在 1500 条 question 训练池中使用 proxy selector，预算为 600 个
-answer units，即 200 个三回答问题；selector 使用 `80 / 20 / 100` 的
-初始化、批次和候选池配置，三阶段各训练 1 个 epoch，并使用 LoRA + 4-bit。
+Ours 在 1500 条 question 训练池中使用与主实验一致的
+`candidate_triple_selector + bias_trap_pointwise`，预算为 600 个 answer
+units，即 200 个三回答问题。selector 使用 LM-head proxy、`80 / 20 / 100`
+的初始化/批次/候选池配置，以及 diversity/uncertainty/bias 权重
+`1.0 / 0.25 / 1.0`；选样 proxy 直接复用为 Stage 1。连续的 1--5 reward
+只为 selector 临时量化到 1--10，最终 pointwise SFT 和评估仍使用原始连续分数。
+Ours 的 pairwise 和 listwise 训练同时开启顺序增强，Naive 不开启。后续阶段
+各训练 1 个 epoch，并使用 LoRA + 4-bit。
 
 Converted 分支保留 UniRRM 的三阶段评价协议和 `<User_Input>` /
 `<ResponseN>` 输入结构，只把最终输出转换成任务标签：pointwise 输出

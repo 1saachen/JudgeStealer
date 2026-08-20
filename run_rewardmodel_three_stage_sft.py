@@ -1017,31 +1017,8 @@ def _selection_args(args: argparse.Namespace, out: Path) -> argparse.Namespace:
     )
 
 
-def _select_three_signal_questions(
-    *, args: argparse.Namespace, out: Path, point_questions: Sequence[SkyworkQuestion]
-) -> Tuple[List[SkyworkQuestion], Dict[str, Any]]:
-    raw_records = json.loads(args.pointwise_train.read_text(encoding="utf-8"))
-    quantized_records: List[Dict[str, Any]] = []
-    for record in raw_records:
-        row = dict(record)
-        for letter in "ABC":
-            score = float(record[f"score{letter}"])
-            row[f"score{letter}"] = max(1, min(10, int(round(score * 2.0))))
-        quantized_records.append(row)
-    quantized_path = out / "selector_pointwise_scores_x2.json"
-    _write_json(quantized_path, quantized_records)
-
-    questions, load_stats = lw._load_scored_questions_ge3(
-        str(quantized_path), score_min=1, score_max=10
-    )
-    candidates, candidate_rows, candidate_stats = lw._build_candidate_triple_examples(
-        questions, randomize_order=True, seed=int(args.seed) + 11
-    )
-    _write_json(out / "selector_dataset_load_stats.json", load_stats)
-    _write_json(out / "candidate_triple_pool_stats.json", candidate_stats)
-    _write_jsonl(out / "candidate_triples.jsonl", candidate_rows)
-
-    cfg = _make_cfg(args)
+def _configure_main_candidate_selector(cfg: Any, args: argparse.Namespace) -> Any:
+    """Apply the selector profile used by the main Ours experiments."""
     cfg.train_selection_mode = "candidate_triple_selector"
     cfg.candidate_selector_kind = "bias_trap_pointwise"
     cfg.candidate_selector_init_triples = int(args.selector_init_questions)
@@ -1049,9 +1026,9 @@ def _select_three_signal_questions(
     cfg.candidate_selector_max_score_candidates = int(args.selector_pool_size)
     cfg.candidate_selector_one_per_question = True
     cfg.candidate_selector_target_task = "pointwise"
-    cfg.candidate_selector_proxy_mode = "classifier_heads"
-    cfg.reuse_selection_proxy_for_stage1 = False
-    cfg.llama_multitask_mode = "classifier_heads"
+    cfg.candidate_selector_proxy_mode = "lm_head"
+    cfg.reuse_selection_proxy_for_stage1 = True
+    cfg.llama_multitask_mode = "lm_head"
     cfg.candidate_selector_proxy_warmup_epochs = int(args.selector_proxy_warmup_epochs)
     cfg.candidate_selector_proxy_update_epochs = int(args.selector_proxy_update_epochs)
     cfg.candidate_selector_exploration_ratio = 0.0
@@ -1076,14 +1053,44 @@ def _select_three_signal_questions(
     cfg.proxy_max_length = int(args.proxy_max_length)
     cfg.score_min = 1
     cfg.score_max = 10
-    cfg.budget_units = 600
+    cfg.budget_units = int(args.budget_units)
+    return cfg
 
-    selected_triples, selected_rows, selected_stats = lw._select_candidate_triples_with_selector(
+
+def _select_three_signal_questions(
+    *, args: argparse.Namespace, out: Path, point_questions: Sequence[SkyworkQuestion]
+) -> Tuple[List[SkyworkQuestion], Dict[str, Any], Any]:
+    raw_records = json.loads(args.pointwise_train.read_text(encoding="utf-8"))
+    quantized_records: List[Dict[str, Any]] = []
+    for record in raw_records:
+        row = dict(record)
+        for letter in "ABC":
+            score = float(record[f"score{letter}"])
+            row[f"score{letter}"] = max(1, min(10, int(round(score * 2.0))))
+        quantized_records.append(row)
+    quantized_path = out / "selector_pointwise_scores_x2.json"
+    _write_json(quantized_path, quantized_records)
+
+    questions, load_stats = lw._load_scored_questions_ge3(
+        str(quantized_path), score_min=1, score_max=10
+    )
+    candidates, candidate_rows, candidate_stats = lw._build_candidate_triple_examples(
+        questions, randomize_order=True, seed=int(args.seed) + 11
+    )
+    _write_json(out / "selector_dataset_load_stats.json", load_stats)
+    _write_json(out / "candidate_triple_pool_stats.json", candidate_stats)
+    _write_jsonl(out / "candidate_triples.jsonl", candidate_rows)
+
+    cfg = _configure_main_candidate_selector(_make_cfg(args), args)
+    selection_result = lw._select_candidate_triples_with_selector(
         candidates=candidates,
         cfg=cfg,
         llama_path=str(args.llama),
         output_dir=out,
     )
+    if len(selection_result) != 4:
+        raise RuntimeError("main selector profile did not return its LM-head Stage-1 proxy")
+    selected_triples, selected_rows, selected_stats, selection_proxy = selection_result
     _write_json(out / "candidate_triple_selection_stats.json", selected_stats)
     _write_jsonl(out / "selected_triples.jsonl", selected_rows)
     selected_ids = {int(triple.source_id) for triple in selected_triples}
@@ -1097,16 +1104,18 @@ def _select_three_signal_questions(
         )
     return selected_questions, {
         **selected_stats,
-        "mode": "three_signal_bias_trap_pointwise",
+        "mode": "main_candidate_triple_bias_trap_pointwise",
         "signals": {"diversity": 1.0, "uncertainty": 0.25, "bias": 1.0},
+        "selection_proxy_mode": "lm_head",
+        "selection_proxy_reused_for_stage1": True,
         "score_quantization": "round(continuous_reward * 2) into classes 1..10 for selector only",
         "final_sft_preserves_continuous_rewards": True,
-    }
+    }, selection_proxy
 
 
 def _select_training_data(
     args: argparse.Namespace, out: Path
-) -> Tuple[List[SkyworkAnswer], Path, Path, Dict[str, Any]]:
+) -> Tuple[List[SkyworkAnswer], Path, Path, Dict[str, Any], Any]:
     point_questions = load_skywork_json(str(args.pointwise_train), dataset_name="reward-model")
     if args.mode == "mix":
         selected_answers = _sample_one_answer_questions(
@@ -1120,10 +1129,10 @@ def _select_training_data(
             raise ValueError("mix expects exactly 200 aligned pairwise/listwise question records")
         return selected_answers, args.pairwise_train, args.listwise_train, {
             "mode": "mix_explicit", "questions": len(point_questions), "pointwise_answers": len(selected_answers)
-        }
+        }, None
 
     if args.mode == "three_signal_selector":
-        selected_questions, selection = _select_three_signal_questions(
+        selected_questions, selection, selection_proxy = _select_three_signal_questions(
             args=args, out=out, point_questions=point_questions
         )
         selected_ids = {int(question.source_id) for question in selected_questions}
@@ -1135,7 +1144,10 @@ def _select_training_data(
         selected_list_path = out / "selected_listwise.json"
         _write_json(selected_pair_path, pair_records)
         _write_json(selected_list_path, list_records)
-        return flatten_answers(selected_questions), selected_pair_path, selected_list_path, selection
+        return (
+            flatten_answers(selected_questions), selected_pair_path, selected_list_path,
+            selection, selection_proxy,
+        )
 
     selected_questions, selection, _ = rm._select_questions(
         train_questions=point_questions,
@@ -1151,7 +1163,7 @@ def _select_training_data(
     selected_list_path = out / "selected_listwise.json"
     _write_json(selected_pair_path, pair_records)
     _write_json(selected_list_path, list_records)
-    return flatten_answers(selected_questions), selected_pair_path, selected_list_path, selection
+    return flatten_answers(selected_questions), selected_pair_path, selected_list_path, selection, None
 
 
 def parse_args() -> argparse.Namespace:
@@ -1242,7 +1254,9 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(args.seed))
 
-    point_answers, pair_train_path, list_train_path, selection = _select_training_data(args, args.out)
+    point_answers, pair_train_path, list_train_path, selection, selection_proxy = (
+        _select_training_data(args, args.out)
+    )
     reward_mean = float(np.mean([answer.reward for answer in point_answers]))
     pair_raw_records = json.loads(pair_train_path.read_text(encoding="utf-8"))
     list_raw_records = json.loads(list_train_path.read_text(encoding="utf-8"))
@@ -1361,10 +1375,32 @@ def main() -> None:
 
     cfg = _make_cfg(args)
     train_stats: Dict[str, Any] = {}
-    train_stats["stage1_pointwise"], model, tokenizer = three._train_sft_on_items(
-        model_name_or_path=str(args.llama), model=None, tokenizer=None, items=point_items,
-        output_dir=args.out / "stage1_pointwise_sft_model", cfg=cfg, stage_name="stage1_pointwise",
-    )
+    if selection_proxy is not None:
+        model = selection_proxy.model
+        tokenizer = selection_proxy.tokenizer
+        selection_proxy = None
+        tokenizer.model_max_length = int(cfg.max_length)
+        stage1_dir = args.out / "stage1_pointwise_sft_model"
+        stage1_dir.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(str(stage1_dir))
+        tokenizer.save_pretrained(str(stage1_dir))
+        train_stats["stage1_pointwise"] = {
+            "mode": "reuse_selection_proxy_lm_head",
+            "stage": "stage1_pointwise",
+            "reused_selection_proxy": True,
+            "skipped_generative_sft_stage": True,
+            "train_samples": len(point_items),
+            "epochs": 0,
+            "selection_proxy_warmup_epochs": int(args.selector_proxy_warmup_epochs),
+            "selection_proxy_update_epochs": int(args.selector_proxy_update_epochs),
+            "selection_proxy_mode": "lm_head",
+            "selector_score_scale": "quantized_1_to_10",
+        }
+    else:
+        train_stats["stage1_pointwise"], model, tokenizer = three._train_sft_on_items(
+            model_name_or_path=str(args.llama), model=None, tokenizer=None, items=point_items,
+            output_dir=args.out / "stage1_pointwise_sft_model", cfg=cfg, stage_name="stage1_pointwise",
+        )
     train_stats["stage2_pairwise"], model, tokenizer = three._train_sft_on_items(
         model_name_or_path=None, model=model, tokenizer=tokenizer, items=pair_items,
         choice_target_distributions=pair_dist, choice_candidate_targets=pair_candidates,
@@ -1437,7 +1473,7 @@ def main() -> None:
         "mode": str(args.mode),
         "final_model": "generative_causal_lm_sft",
         "selector_proxy": (
-            "three_signal_bias_trap_pointwise_classifier_proxy"
+            "main_bias_trap_pointwise_lm_head_reused_stage1"
             if args.mode == "three_signal_selector"
             else "temporary_continuous_regression_only" if args.mode == "selector" else None
         ),

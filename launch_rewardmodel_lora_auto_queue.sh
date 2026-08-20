@@ -167,7 +167,7 @@ resolve_job() {
       train_root="$source/mix200_eval300"
       ;;
     ours)
-      name="${model_tag}_${dataset}_rewardmodel_lora_ours_selector_b600_softties"
+      name="${model_tag}_${dataset}_rewardmodel_lora_ours_mainselector_lmheadreuse_b600_orderaug_softties"
       train_root="$source/split1500_500"
       ;;
     *) return 2 ;;
@@ -217,7 +217,7 @@ run_naive() {
 run_ours() {
   common_args
   "$PY" -u "$TRAIN_SCRIPT" \
-    --mode selector \
+    --mode three_signal_selector \
     --pointwise-train "$train_root/pointwise_train1500.json" \
     --pairwise-train "$train_root/pairwise_train1500.json" \
     --listwise-train "$train_root/listwise_train1500.json" \

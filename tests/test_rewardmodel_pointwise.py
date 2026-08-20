@@ -16,6 +16,7 @@ from run_rewardmodel_three_stage_sft import (
     _listwise_soft_choice_metadata,
     _pairwise_soft_choice_metadata,
     _sample_training_items,
+    _configure_main_candidate_selector,
     _selection_args,
 )
 from run_skywork_pointwise import _answer_proxy_scores_from_predictions
@@ -273,3 +274,37 @@ def test_selector_budget_units_is_forwarded_to_the_selector():
     selection_args = _selection_args(args, Path("outputs/test"))
 
     assert selection_args.budget_units == 603
+
+
+def test_rewardmodel_ours_uses_the_main_experiment_selector_profile():
+    args = SimpleNamespace(
+        budget_units=603,
+        selector_init_questions=80,
+        selector_batch_size=20,
+        selector_pool_size=100,
+        selector_proxy_warmup_epochs=3,
+        selector_proxy_update_epochs=1,
+        proxy_lr=1e-4,
+        proxy_max_length=768,
+    )
+    cfg = SimpleNamespace()
+
+    configured = _configure_main_candidate_selector(cfg, args)
+
+    assert configured is cfg
+    assert cfg.train_selection_mode == "candidate_triple_selector"
+    assert cfg.candidate_selector_kind == "bias_trap_pointwise"
+    assert cfg.candidate_selector_target_task == "pointwise"
+    assert cfg.candidate_selector_proxy_mode == "lm_head"
+    assert cfg.reuse_selection_proxy_for_stage1 is True
+    assert cfg.llama_multitask_mode == "lm_head"
+    assert cfg.candidate_selector_init_triples == 80
+    assert cfg.candidate_selector_batch_size == 20
+    assert cfg.candidate_selector_max_score_candidates == 100
+    assert cfg.candidate_selector_diversity_weight == 1.0
+    assert cfg.candidate_selector_uncertainty_weight == 0.25
+    assert cfg.candidate_selector_bias_weight == 1.0
+    assert cfg.candidate_selector_pairwise_position_bias_scale == 0.02
+    assert cfg.candidate_selector_uncertainty_view == "pointwise"
+    assert cfg.candidate_selector_diversity_view == "pointwise"
+    assert cfg.budget_units == 603
