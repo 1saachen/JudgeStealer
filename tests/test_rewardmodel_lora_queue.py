@@ -51,7 +51,7 @@ def test_rewardmodel_queue_keeps_naive_and_ours_protocols_distinct():
     ):
         assert naive_argument in text
     for ours_argument in (
-        "--mode selector",
+        "--mode three_signal_selector",
         "--budget-units 600",
         "--selector-init-questions 80",
         "--selector-batch-size 20",
@@ -59,6 +59,10 @@ def test_rewardmodel_queue_keeps_naive_and_ours_protocols_distinct():
         "--smooth-alpha 0.1",
     ):
         assert ours_argument in text
+
+    ours = text.split("run_ours() {", 1)[1].split("\nrun_job() {", 1)[0]
+    assert "--mode selector" not in ours
+    assert "ours_mainselector_lmheadreuse_b600_orderaug_softties" in text
 
 
 def test_rewardmodel_ours_enables_pairwise_and_listwise_order_augmentation():
