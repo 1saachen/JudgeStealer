@@ -108,3 +108,14 @@ def test_fsdp_runner_reloads_saved_checkpoint_between_training_stages():
     assert "checkpoint_dir" in text
     assert "out / \"stage2_pairwise_sft_model\"" in text
     assert "out / \"stage3_listwise_sft_model\"" in text
+
+
+def test_fsdp_stage1_checkpoint_dir_is_defined_for_every_training_branch():
+    text = read(RUNNER)
+    definition = 'stage1_dir = out / "stage1_pointwise_sft_model"'
+    stage1_branch = "if str(cfg.resume_stage1_model_dir):"
+    reload_call = "model, tokenizer = _reload_fsdp_stage_model("
+
+    assert text.count(definition) == 1
+    assert text.index(definition) < text.index(stage1_branch) < text.index(reload_call)
+    assert "output_dir=stage1_dir," in text
