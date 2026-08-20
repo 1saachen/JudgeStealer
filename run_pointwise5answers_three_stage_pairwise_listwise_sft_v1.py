@@ -2798,15 +2798,18 @@ def main() -> None:
         elif _is_primary_process():
             print(f"\nSkipping eval metrics: {stage} (eval_stages={cfg.eval_stages})")
 
+    stage1_dir = out / "stage1_pointwise_sft_model"
+
     if str(cfg.resume_stage1_model_dir):
         resume_stage1_dir = Path(str(cfg.resume_stage1_model_dir))
         print(f"\nResuming from saved Stage-1 model: {resume_stage1_dir}", flush=True)
+
         model, tokenizer = _load_stage1_resume_model(
             base_model_path=str(args.llama),
             adapter_dir=resume_stage1_dir,
             cfg=cfg,
         )
-        stage1_dir = out / "stage1_pointwise_sft_model"
+
         stage1_dir.mkdir(parents=True, exist_ok=True)
         model.save_pretrained(str(stage1_dir))
         tokenizer.save_pretrained(str(stage1_dir))
@@ -2835,7 +2838,7 @@ def main() -> None:
         tokenizer = selection_proxy.tokenizer
         selection_proxy = None
         tokenizer.model_max_length = int(cfg.max_length)
-        stage1_dir = out / "stage1_pointwise_sft_model"
+
         stage1_dir.mkdir(parents=True, exist_ok=True)
         model.save_pretrained(str(stage1_dir))
         tokenizer.save_pretrained(str(stage1_dir))
@@ -2859,7 +2862,7 @@ def main() -> None:
             model=None,
             tokenizer=None,
             items=point_items,
-            output_dir=out / "stage1_pointwise_sft_model",
+            output_dir=stage1_dir,
             cfg=cfg,
             stage_name="stage1_pointwise",
             smooth_initial_hist=stage1_pointwise_hist if bool(cfg.pointwise_global_smooth_init_prior_from_stage1) else None,
