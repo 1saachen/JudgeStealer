@@ -36,6 +36,34 @@ import run_pointwise5answers_three_to_listwise_v1 as lw
 import run_pointwise5answers_two_to_pairwise_v1 as base
 
 
+SINGLE_TASK_CHOICES = ("pointwise", "pairwise", "listwise")
+
+
+def _single_task_counts(single_task: str, budget: int) -> Tuple[int, int, int]:
+    task = str(single_task)
+    if task not in SINGLE_TASK_CHOICES:
+        raise ValueError(f"unknown single task: {task}")
+    if int(budget) <= 0:
+        raise ValueError("single-task budget must be positive")
+    return tuple(int(budget) if name == task else 0 for name in SINGLE_TASK_CHOICES)
+
+
+def _single_task_training_spec(
+    single_task: str,
+    point_items: Sequence[Tuple[str, str, str, int]],
+    pair_items: Sequence[Tuple[str, str, str, int]],
+    list_items: Sequence[Tuple[str, str, str, int]],
+) -> Tuple[Sequence[Tuple[str, str, str, int]], str]:
+    mapping = {
+        "pointwise": (point_items, "stage1_pointwise"),
+        "pairwise": (pair_items, "stage2_pairwise"),
+        "listwise": (list_items, "stage3_listwise"),
+    }
+    if str(single_task) not in mapping:
+        raise ValueError(f"unknown single task: {single_task}")
+    return mapping[str(single_task)]
+
+
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -406,7 +434,8 @@ def _eval_all(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["pointwise_only_one_answer", "trueval_three_stage"], required=True)
+    parser.add_argument("--mode", choices=["pointwise_only_one_answer", "trueval_three_stage", "single_task"], required=True)
+    parser.add_argument("--single-task", choices=SINGLE_TASK_CHOICES, default="")
     parser.add_argument("--pointwise-5answers-dataset", default="train_with_selector/train_with_selector/data/newnew/train-20k.json")
     parser.add_argument("--pairwise-val-dataset", default="train_with_selector/train_with_selector/data/newnew/val-2k-eval.json")
     parser.add_argument("--listwise-val-dataset", default="train_with_selector/train_with_selector/data/newnew/val-2k-eval-listwise.json")
@@ -451,6 +480,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if str(args.mode) == "single_task" and not str(args.single_task):
+        raise ValueError("--single-task is required when --mode single_task")
+    if str(args.mode) != "single_task" and str(args.single_task):
+        raise ValueError("--single-task is only valid with --mode single_task")
     cfg = _make_cfg(args)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -478,6 +511,7 @@ def main() -> None:
         {
             **asdict(cfg),
             "mode": str(args.mode),
+            "single_task": str(args.single_task),
             "pointwise_5answers_dataset": str(ds_path),
             "pairwise_val_dataset": str(pairwise_path),
             "listwise_val_dataset": str(listwise_path),
@@ -496,9 +530,14 @@ def main() -> None:
         seed=int(cfg.val_split_seed),
         val_ratio=float(cfg.val_ratio),
     )
+    pointwise_count = (
+        _single_task_counts(str(args.single_task), int(args.budget))[0]
+        if str(args.mode) == "single_task"
+        else int(args.pointwise_train_samples)
+    )
     pointwise_train, pointwise_train_rows, pointwise_train_stats = _select_one_answer_pointwise(
         train_questions,
-        samples=int(args.pointwise_train_samples),
+        samples=pointwise_count,
         seed=int(cfg.seed) + 101,
         score_min=int(cfg.score_min),
         score_max=int(cfg.score_max),
@@ -513,8 +552,24 @@ def main() -> None:
         fix_score_prefix_in_prompt=bool(cfg.fix_score_prefix_in_prompt),
     )
 
-    if str(args.mode) == "trueval_three_stage":
-        if pairwise_train_path:
+    if str(args.mode) in ("trueval_three_stage", "single_task"):
+        pairwise_count = (
+            _single_task_counts(str(args.single_task), int(args.budget))[1]
+            if str(args.mode) == "single_task"
+            else int(args.pairwise_train_pairs)
+        )
+        listwise_count = (
+            _single_task_counts(str(args.single_task), int(args.budget))[2]
+            if str(args.mode) == "single_task"
+            else int(args.listwise_train_examples)
+        )
+        if str(args.mode) == "single_task" and pairwise_count == 0:
+            pairwise_train, pairwise_train_rows, pairwise_train_stats = [], [], {"examples": 0, "split": "not_trained"}
+            pairwise_eval, pairwise_eval_rows, pairwise_eval_stats = base._load_pairwise_abc_eval_dataset(
+                str(pairwise_path), pairwise_system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
+            )
+            pairwise_split = {"split": "full_pairwise_eval_no_pairwise_train"}
+        elif pairwise_train_path:
             pairwise_train_records = base._load_pairwise_abc_raw_records(str(pairwise_train_path))
             pairwise_train, pairwise_train_rows, pairwise_train_stats = base._build_pairwise_abc_examples_from_records(
                 pairwise_train_records,
@@ -522,25 +577,29 @@ def main() -> None:
                 split_name="train_explicit",
                 pairwise_system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT,
             )
-            pairwise_train = pairwise_train[: int(args.pairwise_train_pairs)]
-            pairwise_train_rows = pairwise_train_rows[: int(args.pairwise_train_pairs)]
+            pairwise_train = pairwise_train[: int(pairwise_count)]
+            pairwise_train_rows = pairwise_train_rows[: int(pairwise_count)]
             pairwise_split = {"split": "explicit_train_eval", "train_dataset": str(pairwise_train_path), "eval_dataset": str(pairwise_path)}
             pairwise_eval, pairwise_eval_rows, pairwise_eval_stats = base._load_pairwise_abc_eval_dataset(
                 str(pairwise_path), pairwise_system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
             )
         else:
             pairwise_train, pairwise_train_rows, pairwise_train_stats, pairwise_eval, pairwise_eval_rows, pairwise_eval_stats, pairwise_split = _split_pairwise_trueval(
-                str(pairwise_path), train_pairs=int(args.pairwise_train_pairs), seed=int(cfg.seed) + 202
+            str(pairwise_path), train_pairs=int(pairwise_count), seed=int(cfg.seed) + 202
             )
-        if listwise_train_path:
+        if str(args.mode) == "single_task" and listwise_count == 0:
+            listwise_train, listwise_train_rows, listwise_train_stats = [], [], {"examples": 0, "split": "not_trained"}
+            listwise_eval, listwise_eval_rows, listwise_eval_stats = lw._load_listwise_eval_dataset(str(listwise_path))
+            listwise_split = {"split": "full_listwise_eval_no_listwise_train"}
+        elif listwise_train_path:
             listwise_train, listwise_train_rows, listwise_train_stats = lw._load_listwise_eval_dataset(str(listwise_train_path))
-            listwise_train = listwise_train[: int(args.listwise_train_examples)]
-            listwise_train_rows = listwise_train_rows[: int(args.listwise_train_examples)]
+            listwise_train = listwise_train[: int(listwise_count)]
+            listwise_train_rows = listwise_train_rows[: int(listwise_count)]
             listwise_split = {"split": "explicit_train_eval", "train_dataset": str(listwise_train_path), "eval_dataset": str(listwise_path)}
             listwise_eval, listwise_eval_rows, listwise_eval_stats = lw._load_listwise_eval_dataset(str(listwise_path))
         else:
             listwise_train, listwise_train_rows, listwise_train_stats, listwise_eval, listwise_eval_rows, listwise_eval_stats, listwise_split = _split_listwise_trueval(
-                str(listwise_path), train_examples_count=int(args.listwise_train_examples), seed=int(cfg.seed) + 303
+            str(listwise_path), train_examples_count=int(listwise_count), seed=int(cfg.seed) + 303
             )
     else:
         pairwise_train, pairwise_train_rows, pairwise_train_stats = [], [], {"examples": 0, "split": "not_trained"}
@@ -599,6 +658,69 @@ def main() -> None:
     pointwise_metrics: Dict[str, Any] = {}
     pairwise_metrics: Dict[str, Any] = {}
     listwise_metrics: Dict[str, Any] = {}
+
+    if str(args.mode) == "single_task":
+        single_items, single_stage_name = _single_task_training_spec(
+            str(args.single_task), point_items, pair_items, list_items
+        )
+        single_model_dir = out / f"single_task_{args.single_task}_sft_model"
+        train_stats[f"single_task_{args.single_task}"], model, tokenizer = three._train_sft_on_items(
+            model_name_or_path=str(args.llama),
+            model=None,
+            tokenizer=None,
+            items=single_items,
+            output_dir=single_model_dir,
+            cfg=cfg,
+            stage_name=single_stage_name,
+        )
+        _write_json(out / f"train_stats_single_task_{args.single_task}.json", train_stats[f"single_task_{args.single_task}"])
+        metrics = _eval_all(
+            model=model,
+            tokenizer=tokenizer,
+            cfg=cfg,
+            pointwise_eval=pointwise_eval,
+            pairwise_eval=pairwise_eval,
+            listwise_eval=listwise_eval,
+        )
+        pointwise_metrics["after_single_task"] = metrics["pointwise"]
+        pairwise_metrics["after_single_task"] = metrics["pairwise"]
+        listwise_metrics["after_single_task"] = metrics["listwise"]
+        _write_json(out / "metrics_pointwise_after_single_task.json", metrics["pointwise"])
+        _write_json(out / "metrics_pairwise_after_single_task.json", metrics["pairwise"])
+        _write_json(out / "metrics_listwise_after_single_task.json", metrics["listwise"])
+        summary = {
+            "mode": "single_task",
+            "single_task": str(args.single_task),
+            "train_budget": {
+                "budget": int(args.budget),
+                "pointwise_train": int(len(pointwise_train)),
+                "pairwise_train": int(len(pairwise_train)),
+                "listwise_train": int(len(listwise_train)),
+                "pointwise_one_answer_per_question": True,
+                "pairwise_trueval_training": str(args.single_task) == "pairwise",
+                "listwise_trueval_training": str(args.single_task) == "listwise",
+                "stage2_pointwise_replay_ratio": 0,
+                "stage3_pointwise_replay_ratio": 0,
+                "stage3_pairwise_replay_ratio": 0,
+            },
+            "split_by_question": split_info,
+            "pairwise_trueval_split": pairwise_split,
+            "listwise_trueval_split": listwise_split,
+            "pointwise": {"train": pointwise_train_stats, "eval": pointwise_eval_stats},
+            "pairwise": {"train": pairwise_train_stats, "eval": pairwise_eval_stats},
+            "listwise": {"train": listwise_train_stats, "eval": listwise_eval_stats},
+            "pointwise_metrics": pointwise_metrics,
+            "pairwise_metrics": pairwise_metrics,
+            "listwise_metrics": listwise_metrics,
+            "train_stats": train_stats,
+        }
+        _write_json(out / "summary.json", summary)
+        compact = three._compact_metrics(summary)
+        _write_json(out / "metrics_compact.json", compact)
+        print("Run finished")
+        print(json.dumps(compact, ensure_ascii=False, indent=2))
+        print(f"Output directory: {out}")
+        return
 
     if str(args.resume_stage1_model_dir):
         model, tokenizer = three._load_stage1_resume_model(

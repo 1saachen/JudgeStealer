@@ -4,6 +4,10 @@
 
 当前对应脚本：[`launch_qwen3_gpt5_fullft_auto_queue.sh`](../launch_qwen3_gpt5_fullft_auto_queue.sh)。
 
+Qwen3-1.7B 单任务监督对照实验见
+[`QWEN3_1P7B_SINGLE_TASK_EXPERIMENTS.md`](QWEN3_1P7B_SINGLE_TASK_EXPERIMENTS.md)，
+启动器为 `launch_qwen3_1p7b_single_task_auto_queue.sh`。
+
 ## 1. 核心原则
 
 1. **配置必须显式写入脚本。** 模型、数据、训练阶段、学习率、输出目录和 GPU 规则都不能依赖隐含默认值。
