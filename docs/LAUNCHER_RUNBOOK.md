@@ -292,3 +292,42 @@ find /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs \
   -maxdepth 1 -type d -name 'qwen3_14b_*_gpt5_*' \
   -exec sh -c 'test -f "$1/metrics_compact.json" && printf "\n== %s ==\n" "$1" && python -m json.tool "$1/metrics_compact.json"' _ {} \;
 ```
+
+## 12. Llama 3.2 GPT-5 LoRA 与 Full-FT
+
+Llama 3.2 的启动器默认使用 `models/Llama-3.2-3B-Instruct`，任务仍然是
+Alpaca 和 GPT4All。LoRA 使用单卡自动队列：
+
+```bash
+MODEL_DIR=/data/model-extraction-attack/yaolin/JudgeStealer/models/Llama-3.2-3B-Instruct \
+MODEL_TAG=llama3p2_3b \
+./launch_llama32_gpt5_lora_auto_queue.sh 5 6 7
+```
+
+Full-FT 使用四卡 FSDP，并按顺序运行两个数据集：
+
+```bash
+MODEL_DIR=/data/model-extraction-attack/yaolin/JudgeStealer/models/Llama-3.2-3B-Instruct \
+MODEL_TAG=llama3p2_3b \
+./launch_llama32_gpt5_fullft_fsdp.sh 1 2 3 4
+```
+
+如果你的实际模型目录不是 3B-Instruct，只需替换 `MODEL_DIR`；`MODEL_TAG` 同时决定
+输出目录和日志目录名称。LoRA 日志目录是
+`/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs/${MODEL_TAG}_gpt5_lora_auto_queue_logs`，
+Full-FT 日志目录是对应的 `${MODEL_TAG}_gpt5_fullft_fsdp_logs`。
+
+跳过指定任务：
+
+```bash
+SKIP_JOBS="alpaca" MODEL_DIR=/path/to/llama \
+./launch_llama32_gpt5_lora_auto_queue.sh 5 6 7
+```
+
+完成标志仍然是每个输出目录中的 `metrics_compact.json`；查看 Llama 结果：
+
+```bash
+find /opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs \
+  -maxdepth 1 -type d -name 'llama3p2_*_gpt5_*' \
+  -exec sh -c 'test -f "$1/metrics_compact.json" && printf "\n== %s ==\n" "$1" && python -m json.tool "$1/metrics_compact.json"' _ {} \;
+```
