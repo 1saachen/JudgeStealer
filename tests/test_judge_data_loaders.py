@@ -1,7 +1,9 @@
 import json
+import sys
 
 import pytest
 
+import run_newnew_one_answer_trueval_three_stage_sft as trueval
 import run_pointwise5answers_three_to_listwise_v1 as listwise
 import run_pointwise5answers_two_to_pairwise_v1 as pairwise
 
@@ -129,3 +131,23 @@ def test_explicit_choice_three_remains_a_real_tie():
     ab_index = [item["pair_name"] for item in rows].index("AB")
     assert examples[ab_index].label == pairwise.LABEL_TIE
     assert stats["label_C"] == 1
+
+
+def test_trueval_control_builds_lora_run_config(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "trueval-control",
+            "--mode",
+            "trueval_three_stage",
+            "--out",
+            "temporary-output",
+            "--use-lora",
+            "--load-in-4bit",
+        ],
+    )
+
+    cfg = trueval._make_cfg(trueval.parse_args())
+
+    assert cfg.candidate_selector_finetune_mode == "lora"

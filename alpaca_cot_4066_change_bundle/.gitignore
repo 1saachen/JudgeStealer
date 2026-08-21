@@ -1,0 +1,71 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Virtual environments and local config
+.env
+.venv/
+venv/
+env/
+
+# Model checkpoints and downloaded model repos
+bert-base-uncased/
+llama/
+modelscope_cache/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.onnx
+*.h5
+*.msgpack
+
+# Training/evaluation outputs
+outputs/
+train_with_selector/outputs/
+
+# Large/local datasets
+prepared_data/
+train_with_selector/train_with_selector/data/new/
+
+# Logs and temporary files
+*.log
+nohup.out
+*.tmp
+test_apply_patch_probe.txt
+*.bak
+*.bak_*
+
+# AutoDL/local runtime files
+.autodl/
+
+# Local archives, backups, editor state, and generated caches
+archive/
+recent_three_stage_project_*/
+recent_three_stage_project_*.tar.gz
+recent_three_stage_project_*.tar.gz.sha256
+codex-backup-active-*/
+codex-backup-active-*.tar.gz
+codex-backup-active-*.tar.gz.sha256
+.codex_fonts/
+.vscode/
+tmp*/
+logs/
+
+# Local copies of datasets and derived splits
+train_with_selector/train_with_selector/data/8-12/
+train_with_selector/train_with_selector/data/Alpaca/
+train_with_selector/train_with_selector/data/Alpaca-cot-gpt/
+train_with_selector/train_with_selector/data/Dolly/
+train_with_selector/train_with_selector/data/rewardmodel/
+train_with_selector/train_with_selector/data/new/
+alpaca_*_data/
+selector_smooth_a003_proxy_training_data/
+pairwise_eval_*.json
+
+# Downloaded model repositories
+/qwen/
+/models/

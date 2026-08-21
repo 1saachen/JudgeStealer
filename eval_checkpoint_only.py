@@ -28,7 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True, help="Saved model directory, not the run root.")
     parser.add_argument("--pointwise-dataset", required=True, help="Original scored pointwise JSON dataset.")
-    parser.add_argument("--pairwise-dataset", required=True, help="Pairwise ABC JSON used for evaluation.")
+    parser.add_argument(
+        "--pairwise-dataset",
+        default="",
+        help="Optional pairwise ABC JSON. If omitted, expand pairwise examples from the listwise dataset.",
+    )
     parser.add_argument("--listwise-dataset", required=True, help="Listwise JSON used for evaluation.")
     parser.add_argument("--out", required=True, help="Directory for evaluation metrics.")
     parser.add_argument("--seed", type=int, default=42)
@@ -43,6 +47,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--score-min", type=int, default=1)
     parser.add_argument("--score-max", type=int, default=10)
     return parser.parse_args()
+
+
+def _load_pairwise_eval_dataset(pairwise_path: str, listwise_path: str):
+    """Match the training runner: use explicit ABC pairs, otherwise expand listwise triples."""
+    if str(pairwise_path).strip():
+        return base._load_pairwise_abc_eval_dataset(
+            str(pairwise_path), pairwise_system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
+        )
+    return three._load_pairwise_eval_from_listwise_dataset(str(listwise_path))
 
 
 def _load_eval_data(args: argparse.Namespace) -> Dict[str, Any]:
@@ -60,8 +73,8 @@ def _load_eval_data(args: argparse.Namespace) -> Dict[str, Any]:
         judge_system_prompt=base.JUDGE_SYSTEM_PROMPT_SCORE_ONLY,
         fix_score_prefix_in_prompt=True,
     )
-    pairwise_eval, pairwise_rows, pairwise_stats = base._load_pairwise_abc_eval_dataset(
-        str(args.pairwise_dataset), pairwise_system_prompt=base.DEFAULT_PAIRWISE_SYSTEM_PROMPT
+    pairwise_eval, pairwise_rows, pairwise_stats = _load_pairwise_eval_dataset(
+        str(args.pairwise_dataset), str(args.listwise_dataset)
     )
     listwise_eval, listwise_rows, listwise_stats = listwise._load_listwise_eval_dataset(
         str(args.listwise_dataset)
