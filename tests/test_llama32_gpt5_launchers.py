@@ -2,19 +2,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LORA = ROOT / "launch_llama32_gpt5_lora_auto_queue.sh"
-FULLFT = ROOT / "launch_llama32_gpt5_fullft_fsdp.sh"
+LORA = ROOT / "launch_qwen3_32b_gpt5_lora_auto_queue.sh"
+FULLFT = ROOT / "launch_qwen3_32b_gpt5_fullft_fsdp.sh"
 
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_both_launchers_use_overridable_llama_model_and_both_datasets():
+def test_both_launchers_use_overridable_qwen_model_and_both_datasets():
     for path in (LORA, FULLFT):
         text = read(path)
-        assert 'MODEL_DIR="${MODEL_DIR:-$ROOT/models/Llama-3.2-3B-Instruct}"' in text
-        assert 'MODEL_TAG="${MODEL_TAG:-llama3p2_3b}"' in text
+        assert 'MODEL_DIR="${MODEL_DIR:-$ROOT/models/Qwen3-32B}"' in text
+        assert 'MODEL_TAG="${MODEL_TAG:-qwen3_32b}"' in text
         assert 'JOBS=(alpaca gpt4all)' in text
         assert "$ROOT/data/alpaca/gpt5/train-20k.json" in text
         assert "$ROOT/data/alpaca/gpt5/val-2k-eval-listwise.json" in text
@@ -35,11 +35,11 @@ def test_lora_launcher_is_single_gpu_and_uses_lora_protocol():
     assert 'name="${MODEL_TAG}_${dataset}_gpt5_b600_lora_selector_smooth_a010_pool100_stage4stratfull"' in text
 
 
-def test_fullft_launcher_uses_four_gpu_fsdp_and_llama_layer():
+def test_fullft_launcher_uses_four_gpu_fsdp_and_qwen_layer():
     text = read(FULLFT)
     for argument in (
         '"$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$SCRIPT"',
-        "--fsdp-transformer-layer-cls-to-wrap LlamaDecoderLayer",
+        "--fsdp-transformer-layer-cls-to-wrap Qwen3DecoderLayer",
         "--fsdp-activation-checkpointing",
         "--learning-rate 1e-5",
         "--proxy-lr 1e-5",

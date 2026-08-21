@@ -1,15 +1,15 @@
-# Llama 3.2 GPT-5 Launcher Design
+# Qwen3-32B GPT-5 Launcher Design
 
 ## Goal
 
-补充 Llama 3.2 3B-Instruct 在 Alpaca 和 GPT4All GPT-5 数据上的 LoRA 与 Full-FT 主实验启动器。
+补充 Qwen3-32B 在 Alpaca 和 GPT4All GPT-5 数据上的 LoRA 与 Full-FT 主实验启动器。
 
 ## Scope
 
 - 新增 LoRA 单卡自动队列脚本。
 - 新增 Full-FT 四卡 FSDP 顺序队列脚本。
 - 两个脚本都支持 `SKIP_JOBS`、空闲 GPU 检测、完成标记保护、NVMe 输出和独立日志。
-- 默认模型路径为 `models/Llama-3.2-3B-Instruct`。
+- 默认模型路径为 `models/Qwen3-32B`。
 - 通过 `MODEL_DIR` 覆盖模型路径，通过 `MODEL_TAG` 覆盖输出名称中的模型标签。
 
 ## Experiment Configuration
@@ -37,4 +37,4 @@ ${MODEL_TAG}_${dataset}_gpt5_b600_fullft_selector_smooth_a010_pool100_stage4stra
 
 ## Model Compatibility
 
-The Full-FT launcher wraps `LlamaDecoderLayer` for FSDP. The model path is validated through `config.json` before a job starts.
+The Full-FT launcher wraps `Qwen3DecoderLayer` for FSDP. The model path is validated through `config.json` before a job starts.

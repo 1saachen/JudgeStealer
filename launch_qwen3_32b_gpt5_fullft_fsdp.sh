@@ -3,26 +3,24 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON_BIN:-python}"
+TORCHRUN_BIN="${TORCHRUN_BIN:-torchrun}"
 SCRIPT="$ROOT/run_pointwise5answers_three_stage_pairwise_listwise_sft_v1.py"
-MODEL_DIR="${MODEL_DIR:-$ROOT/models/Llama-3.2-3B-Instruct}"
-MODEL_TAG="${MODEL_TAG:-llama3p2_3b}"
+MODEL_DIR="${MODEL_DIR:-$ROOT/models/Qwen3-32B}"
+MODEL_TAG="${MODEL_TAG:-qwen3_32b}"
 DEFAULT_OUTPUT_ROOT="/opt/dlami/nvme/cyl/autodl-tmp/JudgeStealer_outputs"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$DEFAULT_OUTPUT_ROOT}"
-LOG_ROOT="$OUTPUT_ROOT/${MODEL_TAG}_gpt5_lora_auto_queue_logs"
+LOG_ROOT="$OUTPUT_ROOT/${MODEL_TAG}_gpt5_fullft_fsdp_logs"
 STATUS_LOG="$LOG_ROOT/job_status.log"
 POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
 SKIP_JOBS="${SKIP_JOBS:-}"
 
-if [[ "$#" -eq 0 ]]; then
-  echo "usage: $0 <gpu_id> [gpu_id ...]" >&2
+if [[ "$#" -ne 4 ]]; then
+  echo "usage: $0 <gpu_id_a> <gpu_id_b> <gpu_id_c> <gpu_id_d>" >&2
   exit 2
 fi
-
-ALLOWED_GPUS=("$@")
+GPU_IDS=("$1" "$2" "$3" "$4")
 JOBS=(alpaca gpt4all)
-declare -A GPU_WORKER_PIDS=()
-declare -A GPU_WORKER_JOBS=()
 
 mkdir -p "$OUTPUT_ROOT" "$LOG_ROOT" || exit 1
 cd "$ROOT"
@@ -53,15 +51,6 @@ should_skip_job() {
     [[ "$skipped" == "$candidate" ]] && return 0
   done
   return 1
-}
-
-skip_configured_jobs() {
-  local job
-  while (( next_job_index < ${#JOBS[@]} )) && should_skip_job "${JOBS[$next_job_index]}"; do
-    job="${JOBS[$next_job_index]}"
-    log_status "SKIP configured job=$job"
-    next_job_index=$((next_job_index + 1))
-  done
 }
 
 gpu_uuid() {
@@ -103,16 +92,16 @@ resolve_job() {
     train="$ROOT/data/gpt4all/gpt5/train9k_pointwise_pairwise_no_val_overlap.json"
     eval="$ROOT/data/gpt4all/gpt5/val3k_pairwise_listwise.json"
   fi
-  name="${MODEL_TAG}_${dataset}_gpt5_b600_lora_selector_smooth_a010_pool100_stage4stratfull"
+  name="${MODEL_TAG}_${dataset}_gpt5_b600_fullft_selector_smooth_a010_pool100_stage4stratfull"
   out="$OUTPUT_ROOT/$name"
   log="$LOG_ROOT/$name.log"
 }
 
 run_job() {
-  local job="$1" gpu="$2" dataset train eval name out log required_file rc
+  local job="$1" dataset train eval name out log required_file rc
   resolve_job "$job" || { log_status "ERROR unknown job=$job"; return 2; }
-  if ! command -v "$PY" >/dev/null 2>&1; then
-    log_status "ERROR python not found=$PY job=$job"
+  if ! command -v "$PY" >/dev/null 2>&1 || ! command -v "$TORCHRUN_BIN" >/dev/null 2>&1; then
+    log_status "ERROR python_or_torchrun_missing job=$job python=$PY torchrun=$TORCHRUN_BIN"
     return 1
   fi
   for required_file in "$SCRIPT" "$MODEL_DIR/config.json" "$train" "$eval"; do
@@ -134,10 +123,10 @@ run_job() {
     return 1
   fi
 
-  log_status "START job=$job gpu=$gpu out=$out"
-  CUDA_VISIBLE_DEVICES="$gpu" PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false \
-  PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    "$PY" -u "$SCRIPT" \
+  log_status "START job=$job gpus=${GPU_IDS[*]} out=$out"
+  CUDA_VISIBLE_DEVICES="$(IFS=,; echo "${GPU_IDS[*]}")" PYTHONUNBUFFERED=1 \
+  TOKENIZERS_PARALLELISM=false PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    "$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$SCRIPT" \
       --pointwise-5answers-dataset "$train" \
       --listwise-eval-dataset "$eval" \
       --llama "$MODEL_DIR" \
@@ -147,14 +136,18 @@ run_job() {
       --stage4-replay-strategy stratified_triple --stage4-replay-fraction 1 \
       --stage4-epochs 1 --pointwise-epochs 1 --pairwise-epochs 1 --listwise-epochs 1 \
       --per-device-batch-size 1 --gradient-accumulation-steps 16 \
-      --learning-rate 1e-4 --max-length 4096 --eval-batch-size 1 --eval-stages final \
-      --use-lora --load-in-4bit \
+      --learning-rate 1e-5 --max-length 4096 --eval-batch-size 1 --eval-stages final \
+      --fsdp "full_shard auto_wrap" \
+      --fsdp-transformer-layer-cls-to-wrap Qwen3DecoderLayer \
+      --fsdp-activation-checkpointing --fsdp-use-orig-params \
+      --fsdp-state-dict-type FULL_STATE_DICT \
       --pointwise-global-smooth-alpha 0.1 --pointwise-global-smooth-mode local_gaussian \
       --pointwise-global-smooth-gaussian-sigma 1.0 --pointwise-global-smooth-stages all \
       --train-selection-mode candidate_triple_selector \
       --candidate-selector-kind bias_trap_pointwise --candidate-selector-target-task pointwise \
       --candidate-selector-proxy-mode lm_head --candidate-selector-finetune-mode lora \
-      --reuse-selection-proxy-for-stage1 --candidate-selector-init-triples 80 \
+      --candidate-selector-load-in-4bit \
+      --candidate-selector-init-triples 80 \
       --candidate-selector-batch-size 20 --candidate-selector-max-score-candidates 100 \
       --candidate-selector-one-per-question --candidate-selector-proxy-warmup-epochs 3 \
       --candidate-selector-proxy-update-epochs 1 --candidate-selector-exploration-ratio 0 \
@@ -166,52 +159,52 @@ run_job() {
       --candidate-selector-embedding-model BAAI/bge-small-en-v1.5 \
       --candidate-selector-embedding-max-length 512 --candidate-selector-embedding-batch-size 64 \
       --candidate-selector-embedding-pooling cls --candidate-selector-diversity-view pointwise \
-      --proxy-lr 1e-4 --proxy-max-length 768 --out "$out" >"$log" 2>&1
+      --proxy-lr 1e-5 --proxy-max-length 768 --out "$out" >"$log" 2>&1
   rc=$?
   if [[ "$rc" -eq 0 && -f "$out/metrics_compact.json" ]]; then
-    log_status "DONE job=$job gpu=$gpu out=$out"
+    log_status "DONE job=$job gpus=${GPU_IDS[*]} out=$out"
     return 0
   fi
   [[ "$rc" -ne 0 ]] || rc=1
-  log_status "ERROR job=$job gpu=$gpu rc=$rc out=$out log=$log"
+  log_status "ERROR job=$job gpus=${GPU_IDS[*]} rc=$rc out=$out log=$log"
   return "$rc"
 }
 
 check_output_storage
 command -v nvidia-smi >/dev/null 2>&1 || { echo "nvidia-smi is required" >&2; exit 2; }
 command -v flock >/dev/null 2>&1 || { echo "flock is required" >&2; exit 2; }
-for gpu in "${ALLOWED_GPUS[@]}"; do
+for gpu in "${GPU_IDS[@]}"; do
   if [[ ! "$gpu" =~ ^[0-9]+$ ]] || [[ -z "$(gpu_uuid "$gpu")" ]]; then
     echo "invalid GPU id: $gpu" >&2
     exit 2
   fi
 done
+declare -A SEEN_GPU_IDS=()
+for gpu in "${GPU_IDS[@]}"; do
+  if [[ -n "${SEEN_GPU_IDS[$gpu]+seen}" ]]; then
+    echo "four distinct GPU ids are required" >&2
+    exit 2
+  fi
+  SEEN_GPU_IDS[$gpu]=1
+done
 
-next_job_index=0
-active_workers=0
+all_gpus_are_idle() {
+  local gpu
+  for gpu in "${GPU_IDS[@]}"; do
+    gpu_is_idle "$gpu" || return 1
+  done
+}
+
 overall_rc=0
-while (( next_job_index < ${#JOBS[@]} || active_workers > 0 )); do
-  for gpu in "${!GPU_WORKER_PIDS[@]}"; do
-    pid="${GPU_WORKER_PIDS[$gpu]}"
-    if ! kill -0 "$pid" 2>/dev/null; then
-      if wait "$pid"; then rc=0; else rc=$?; overall_rc=1; fi
-      log_status "WORKER_EXIT job=${GPU_WORKER_JOBS[$gpu]} gpu=$gpu rc=$rc"
-      unset 'GPU_WORKER_PIDS[$gpu]' 'GPU_WORKER_JOBS[$gpu]'
-      active_workers=$((active_workers - 1))
-    fi
+for job in "${JOBS[@]}"; do
+  should_skip_job "$job" && { log_status "SKIP configured job=$job"; continue; }
+  resolve_job "$job" || exit 1
+  while ! all_gpus_are_idle; do
+    log_status "WAIT job=$job gpus=${GPU_IDS[*]} reason=not_idle"
+    sleep "$POLL_SECONDS"
   done
-  for gpu in "${ALLOWED_GPUS[@]}"; do
-    skip_configured_jobs
-    (( next_job_index < ${#JOBS[@]} )) || break
-    [[ -z "${GPU_WORKER_PIDS[$gpu]+assigned}" ]] || continue
-    gpu_is_idle "$gpu" || continue
-    job="${JOBS[$next_job_index]}"
-    run_job "$job" "$gpu" &
-    GPU_WORKER_PIDS[$gpu]=$!
-    GPU_WORKER_JOBS[$gpu]="$job"
-    active_workers=$((active_workers + 1))
-    next_job_index=$((next_job_index + 1))
-  done
-  if (( next_job_index < ${#JOBS[@]} || active_workers > 0 )); then sleep "$POLL_SECONDS"; fi
+  if ! run_job "$job"; then
+    overall_rc=1
+  fi
 done
 exit "$overall_rc"
