@@ -93,6 +93,15 @@ def _load_eval_data(args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
+def _move_model_to_eval_device(model):
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for checkpoint-only evaluation")
+    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    device = torch.device("cuda", torch.cuda.current_device())
+    print(f"Moving checkpoint to {device} ({dtype})", flush=True)
+    return model.to(device=device, dtype=dtype)
+
+
 def main() -> None:
     args = parse_args()
     checkpoint = Path(args.checkpoint).expanduser().resolve()
@@ -137,6 +146,7 @@ def main() -> None:
         max_length=int(args.max_length),
         load_in_4bit=False,
     )
+    model = _move_model_to_eval_device(model)
     tokenizer.model_max_length = int(args.max_length)
     tokenizer.padding_side = "left"
 
