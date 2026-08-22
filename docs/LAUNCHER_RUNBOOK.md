@@ -304,13 +304,15 @@ MODEL_TAG=qwen3_32b \
 ./launch_qwen3_32b_gpt5_lora_auto_queue.sh 5 6 7
 ```
 
-Full-FT 使用四卡 FSDP，并按顺序运行两个数据集：
+Full-FT 使用传入的 GPU 数量进行 FSDP，并按顺序运行两个数据集。Qwen3-32B 建议至少使用 8 张 140GB 卡；脚本要求至少 4 张卡，并自动将 `nproc_per_node` 设置为传入卡数：
 
 ```bash
 MODEL_DIR=/data/model-extraction-attack/yaolin/JudgeStealer/models/Qwen3-32B \
 MODEL_TAG=qwen3_32b \
-./launch_qwen3_32b_gpt5_fullft_fsdp.sh 1 2 3 4
+./launch_qwen3_32b_gpt5_fullft_fsdp.sh 0 1 2 3 4 5 6 7
 ```
+
+也可以显式设置 `NPROC_PER_NODE`，但它必须等于命令行中 GPU id 的数量。
 
 如果你的实际模型目录不是 3B-Instruct，只需替换 `MODEL_DIR`；`MODEL_TAG` 同时决定
 输出目录和日志目录名称。LoRA 日志目录是

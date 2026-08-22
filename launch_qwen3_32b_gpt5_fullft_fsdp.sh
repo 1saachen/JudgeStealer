@@ -15,11 +15,16 @@ POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
 SKIP_JOBS="${SKIP_JOBS:-}"
 
-if [[ "$#" -ne 4 ]]; then
-  echo "usage: $0 <gpu_id_a> <gpu_id_b> <gpu_id_c> <gpu_id_d>" >&2
+if [[ "$#" -lt 4 ]]; then
+  echo "usage: $0 <gpu_id_a> <gpu_id_b> <gpu_id_c> <gpu_id_d> [gpu_id ...]" >&2
   exit 2
 fi
-GPU_IDS=("$1" "$2" "$3" "$4")
+GPU_IDS=("$@")
+NPROC_PER_NODE="${NPROC_PER_NODE:-${#GPU_IDS[@]}}"
+if [[ ! "$NPROC_PER_NODE" =~ ^[1-9][0-9]*$ ]] || [[ "$NPROC_PER_NODE" -ne "${#GPU_IDS[@]}" ]]; then
+  echo "NPROC_PER_NODE must equal the number of GPU ids (${#GPU_IDS[@]})" >&2
+  exit 2
+fi
 JOBS=(alpaca gpt4all)
 
 mkdir -p "$OUTPUT_ROOT" "$LOG_ROOT" || exit 1
@@ -123,10 +128,10 @@ run_job() {
     return 1
   fi
 
-  log_status "START job=$job gpus=${GPU_IDS[*]} out=$out"
+  log_status "START job=$job gpus=${GPU_IDS[*]} nproc_per_node=$NPROC_PER_NODE out=$out"
   CUDA_VISIBLE_DEVICES="$(IFS=,; echo "${GPU_IDS[*]}")" PYTHONUNBUFFERED=1 \
   TOKENIZERS_PARALLELISM=false PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    "$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$SCRIPT" \
+    "$TORCHRUN_BIN" --standalone --nproc_per_node="$NPROC_PER_NODE" "$SCRIPT" \
       --pointwise-5answers-dataset "$train" \
       --listwise-eval-dataset "$eval" \
       --llama "$MODEL_DIR" \
@@ -162,11 +167,11 @@ run_job() {
       --proxy-lr 1e-5 --proxy-max-length 768 --out "$out" >"$log" 2>&1
   rc=$?
   if [[ "$rc" -eq 0 && -f "$out/metrics_compact.json" ]]; then
-    log_status "DONE job=$job gpus=${GPU_IDS[*]} out=$out"
+    log_status "DONE job=$job gpus=${GPU_IDS[*]} nproc_per_node=$NPROC_PER_NODE out=$out"
     return 0
   fi
   [[ "$rc" -ne 0 ]] || rc=1
-  log_status "ERROR job=$job gpus=${GPU_IDS[*]} rc=$rc out=$out log=$log"
+  log_status "ERROR job=$job gpus=${GPU_IDS[*]} nproc_per_node=$NPROC_PER_NODE rc=$rc out=$out log=$log"
   return "$rc"
 }
 
@@ -182,7 +187,7 @@ done
 declare -A SEEN_GPU_IDS=()
 for gpu in "${GPU_IDS[@]}"; do
   if [[ -n "${SEEN_GPU_IDS[$gpu]+seen}" ]]; then
-    echo "four distinct GPU ids are required" >&2
+    echo "distinct GPU ids are required" >&2
     exit 2
   fi
   SEEN_GPU_IDS[$gpu]=1

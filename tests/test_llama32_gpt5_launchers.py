@@ -38,7 +38,7 @@ def test_lora_launcher_is_single_gpu_and_uses_lora_protocol():
 def test_fullft_launcher_uses_four_gpu_fsdp_and_qwen_layer():
     text = read(FULLFT)
     for argument in (
-        '"$TORCHRUN_BIN" --standalone --nproc_per_node=4 "$SCRIPT"',
+        '"$TORCHRUN_BIN" --standalone --nproc_per_node="$NPROC_PER_NODE" "$SCRIPT"',
         "--fsdp-transformer-layer-cls-to-wrap Qwen3DecoderLayer",
         "--fsdp-activation-checkpointing",
         "--learning-rate 1e-5",
@@ -49,7 +49,15 @@ def test_fullft_launcher_uses_four_gpu_fsdp_and_qwen_layer():
         assert argument in text
     assert "--use-lora" not in text
     assert "--load-in-4bit" not in text
-    assert 'if [[ "$#" -ne 4 ]]' in text
+    assert 'if [[ "$#" -lt 4 ]]' in text
+
+
+def test_fullft_launcher_supports_eight_gpu_runs_from_argument_count():
+    text = read(FULLFT)
+    assert 'if [[ "$#" -lt 4 ]]' in text
+    assert 'NPROC_PER_NODE="${NPROC_PER_NODE:-${#GPU_IDS[@]}}"' in text
+    assert '--nproc_per_node="$NPROC_PER_NODE"' in text
+    assert 'gpus=${GPU_IDS[*]}' in text
 
 
 def test_both_launchers_use_common_experiment_controls():

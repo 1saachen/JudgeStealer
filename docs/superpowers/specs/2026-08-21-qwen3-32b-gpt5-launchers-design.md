@@ -7,7 +7,7 @@
 ## Scope
 
 - 新增 LoRA 单卡自动队列脚本。
-- 新增 Full-FT 四卡 FSDP 顺序队列脚本。
+- 新增 Full-FT 动态卡数 FSDP 顺序队列脚本，至少 4 卡，Qwen3-32B 推荐 8 卡。
 - 两个脚本都支持 `SKIP_JOBS`、空闲 GPU 检测、完成标记保护、NVMe 输出和独立日志。
 - 默认模型路径为 `models/Qwen3-32B`。
 - 通过 `MODEL_DIR` 覆盖模型路径，通过 `MODEL_TAG` 覆盖输出名称中的模型标签。

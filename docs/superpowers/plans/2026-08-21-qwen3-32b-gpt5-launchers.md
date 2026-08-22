@@ -31,7 +31,7 @@
 **Files:**
 - Create: `launch_qwen3_32b_gpt5_fullft_fsdp.sh`
 
-- [ ] **Step 1: Implement** four-GPU idle scheduling, FSDP torchrun invocation, `Qwen3DecoderLayer`, model overrides, and output guards.
+- [ ] **Step 1: Implement** dynamic (at least four) GPU idle scheduling, FSDP torchrun invocation, `Qwen3DecoderLayer`, model overrides, and output guards.
 - [ ] **Step 2: Run syntax, contract, and diff checks.**
 
 ### Task 4: Document usage
