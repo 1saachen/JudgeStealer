@@ -9,6 +9,7 @@ STATUS_LOG="$LOG_ROOT/job_status.log"
 POLL_SECONDS="${POLL_SECONDS:-30}"
 GPU_MEMORY_USED_LIMIT_MB=1024
 SKIP_JOBS="${SKIP_JOBS:-}"
+SEED="${SEED:-42}"
 
 DATA_ROOT="${DATA_ROOT:-/data/model-extraction-attack/yaolin/JudgeStealer/data}"
 ALPACA_COT_DATA_DIR="${ALPACA_COT_DATA_DIR:-$DATA_ROOT/Alpaca-cot-gpt}"
@@ -120,7 +121,7 @@ prepare_dataset() {
     --train "$train" \
     --validation "$validation" \
     --output-dir "$prepared_dir" \
-    --seed 42 \
+    --seed "$SEED" \
     --mix-questions 200
 }
 
@@ -167,7 +168,7 @@ run_job() {
     fi
   done
 
-  name="${surrogate}_${dataset}_gpt5_cot_${paper_method}_seed42"
+  name="${surrogate}_${dataset}_gpt5_cot_${paper_method}_seed${SEED}"
   out="$OUTPUT_ROOT/$name"
   log="$LOG_ROOT/$name.log"
   if [[ -f "$out/metrics_compact.json" ]]; then
@@ -197,13 +198,14 @@ run_job() {
       --mix-pointwise "$prepared_dir/mix_pointwise_train_200.json" \
       --mix-pairwise "$prepared_dir/mix_pairwise_train_200.json" \
       --mix-listwise "$prepared_dir/mix_listwise_train_200.json" \
-      --seed 42 \
+      --seed "$SEED" \
       --per-device-batch-size 1 \
       --gradient-accumulation-steps 16 \
       --learning-rate 1e-4 \
       --max-length 4096 \
       --eval-batch-size 1 \
-      --eval-max-new-tokens 192 \
+      --eval-max-new-tokens 384 \
+      --synthetic-max-new-tokens 256 \
       --use-lora \
       --load-in-4bit \
       >"$log" 2>&1
